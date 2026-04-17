@@ -12,6 +12,8 @@ type ParsedListing = {
   listingType?: "FOR_LEASE" | "FOR_SALE" | "BOTH";
   locationDescription?: string;
   listingSummary?: string;
+  ownerProvisions?: string;
+  leaseTermYears?: number;
   features?: Array<{ featureValueText?: string }>;
   disclosures?: Array<{ text?: string }>;
 };
@@ -29,6 +31,8 @@ type ListingRecordLike = {
   listingType?: "FOR_LEASE" | "FOR_SALE" | "BOTH";
   locationDescription?: string;
   listingSummary?: string;
+  ownerProvisions?: string;
+  leaseTermYears?: number;
   source: "AI_PARSE";
   features: Array<{ featureValueText: string; sourceText: string }>;
   disclosures: Array<{ text: string; sourceText: string; source: "PARSED"; isMaterial: true }>;
@@ -55,6 +59,8 @@ const parserSchema = {
       listingType: { type: "string", enum: ["FOR_LEASE", "FOR_SALE", "BOTH"] },
       locationDescription: { type: "string" },
       listingSummary: { type: "string" },
+      ownerProvisions: { type: "string" },
+      leaseTermYears: { type: "number" },
       features: {
         type: "array",
         items: {
@@ -113,6 +119,8 @@ function normalizeParsedListing(parsed: ParsedListing): ListingRecordLike {
         .find((value) => /(located|location|access|route|turnpike|highway|corridor|transit|near|proximity)/i.test(value)) ||
       undefined,
     listingSummary: parsed.listingSummary?.trim() || undefined,
+    ownerProvisions: parsed.ownerProvisions?.trim() || undefined,
+    leaseTermYears: typeof parsed.leaseTermYears === "number" ? Math.round(parsed.leaseTermYears) : undefined,
     source: "AI_PARSE",
     features,
     disclosures,
@@ -146,7 +154,7 @@ export async function runStructuredListingParser(rawText: string, signal?: Abort
         {
           role: "system",
           content:
-            "Extract commercial listing details into strict JSON. Prefer concrete values from text. Set addressLine1 to the street address. For locationDescription, capture the strongest location/access phrase from the source text (e.g., near highways, routes, turnpike, transit, or logistics corridors). Leave missing fields empty.",
+            "Extract commercial listing details into strict JSON. Prefer concrete values from text. Set addressLine1 to the street address. For locationDescription, capture the strongest location/access phrase from the source text (e.g., near highways, routes, turnpike, transit, or logistics corridors). Also extract ownerProvisions as what ownership is willing to offer the right tenant (e.g., free rent, TI allowance, landlord buildout, rent ramp, flexible term) and leaseTermYears when explicitly stated. Leave missing fields empty.",
         },
         {
           role: "user",

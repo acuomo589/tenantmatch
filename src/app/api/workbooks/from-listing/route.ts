@@ -16,6 +16,8 @@ type ListingInput = {
   squareFootage?: number;
   lotSizeAcres?: number;
   listingSummary?: string;
+  ownerProvisions?: string;
+  leaseTermYears?: number;
   features?: Array<{ featureValueText?: string; sourceText?: string }>;
   disclosures?: Array<{ text?: string }>;
 };
@@ -160,6 +162,8 @@ export async function POST(request: Request) {
       squareFootage: listing.squareFootage,
       lotSizeAcres: listing.lotSizeAcres,
       listingSummary: listing.listingSummary,
+      ownerProvisions: listing.ownerProvisions,
+      leaseTermYears: listing.leaseTermYears,
       features: (listing.features ?? []).map((x) => x.featureValueText ?? x.sourceText).filter(Boolean),
       disclosures: (listing.disclosures ?? []).map((x) => x.text).filter(Boolean),
     };

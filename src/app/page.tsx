@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, CSSProperties } from "react";
 import { BookOpen, Building2, ChevronLeft, Menu, MessageSquare, SquarePen, Upload, Search } from "lucide-react";
 import { AgGridReact } from "ag-grid-react";
@@ -40,6 +40,8 @@ type ListingRecord = {
   heroImageUrl?: string;
   locationDescription?: string;
   listingSummary?: string;
+  ownerProvisions?: string;
+  leaseTermYears?: number;
   rawDetails?: string;
   rentalRatePerSfYr?: number;
   listingType?: "FOR_LEASE" | "FOR_SALE" | "BOTH";
@@ -119,9 +121,37 @@ type WorkbookResult = {
   rows: WorkbookRow[];
 };
 
+type OutreachContact = {
+  id: string;
+  name: string;
+  title: string;
+  email?: string;
+  confidence: "high" | "medium" | "low";
+};
+
+type OutreachTarget = {
+  id: string;
+  listingId: string;
+  workbookId: string;
+  workbookRow: WorkbookRow;
+  businessAgeYears?: number;
+  industry?: string;
+  parentCompany?: string;
+  estimatedRevenue?: string;
+  hqAddress?: string;
+  contacts: OutreachContact[];
+  selectedContactId?: string;
+  emailSubject: string;
+  emailBody: string;
+  generatingEmail?: boolean;
+  sendingEmail?: boolean;
+  lastSendStatus?: "idle" | "sent" | "failed";
+  lastSendMessage?: string;
+};
+
 ModuleRegistry.registerModules([AllCommunityModule]);
 
-const WORKBOOK_COL_DEFS: ColDef<WorkbookRow>[] = [
+const WORKBOOK_BASE_COL_DEFS: ColDef<WorkbookRow>[] = [
   { field: "priority_rank", headerName: "Rank", width: 90, sortable: true, filter: true },
   { field: "business_name", headerName: "Business", minWidth: 220, flex: 1.2, sortable: true, filter: true },
   { field: "category", headerName: "Category", minWidth: 140, flex: 0.8, sortable: true, filter: true },
@@ -161,6 +191,9 @@ export default function HomePage() {
   const [activeWorkbookId, setActiveWorkbookId] = useState<string | null>(null);
   const [creatingWorkbookListingId, setCreatingWorkbookListingId] = useState<string | null>(null);
   const [workbookError, setWorkbookError] = useState<string | null>(null);
+  const [outreachTargets, setOutreachTargets] = useState<OutreachTarget[]>([]);
+  const [activeOutreachTargetId, setActiveOutreachTargetId] = useState<string | null>(null);
+  const [outreachError, setOutreachError] = useState<string | null>(null);
 
   const updateListing = (listingId: string, updater: (listing: ListingRecord) => ListingRecord) => {
     setListings((prev) => prev.map((listing) => (listing.id === listingId ? updater(listing) : listing)));
@@ -222,6 +255,178 @@ export default function HomePage() {
   };
 
   const activeWorkbook = workbooks.find((workbook) => workbook.id === activeWorkbookId) ?? workbooks[0] ?? null;
+
+  const updateOutreachTarget = useCallback((targetId: string, updater: (target: OutreachTarget) => OutreachTarget) => {
+    setOutreachTargets((prev) => prev.map((target) => (target.id === targetId ? updater(target) : target)));
+  }, []);
+
+  const openOutreachForRow = useCallback(
+    (row: WorkbookRow) => {
+      if (!activeWorkbook) return;
+      const id = `${activeWorkbook.id}_${slugifyForId(row.business_name)}`;
+      setOutreachTargets((prev) => {
+        const existing = prev.find((target) => target.id === id);
+        if (existing) return prev;
+
+        const fallbackContact = row.owner_contact_name && row.owner_contact_name !== "N/A" ? row.owner_contact_name : undefined;
+        const contacts = buildSuggestedContacts(row, fallbackContact);
+        const firstContact = contacts[0];
+
+        const next: OutreachTarget = {
+          id,
+          listingId: activeWorkbook.listingId,
+          workbookId: activeWorkbook.id,
+          workbookRow: row,
+          businessAgeYears: undefined,
+          industry: row.category,
+          parentCompany: undefined,
+          estimatedRevenue: undefined,
+          hqAddress: `${row.city}, ${row.state}`,
+          contacts,
+          selectedContactId: firstContact?.id,
+          emailSubject: "",
+          emailBody: "",
+          lastSendStatus: "idle",
+        };
+
+        return [next, ...prev];
+      });
+      setActiveOutreachTargetId(id);
+      setPrimaryTab("outreach");
+      setOutreachError(null);
+    },
+    [activeWorkbook],
+  );
+
+  const workbookColDefs = useMemo<ColDef<WorkbookRow>[]>(
+    () => [
+      ...WORKBOOK_BASE_COL_DEFS,
+      {
+        headerName: "Action",
+        colId: "action",
+        width: 130,
+        pinned: "right",
+        sortable: false,
+        filter: false,
+        cellRenderer: (params: { data?: WorkbookRow }) =>
+          params.data ? (
+            <Button size="sm" variant="outline" onClick={() => openOutreachForRow(params.data as WorkbookRow)}>
+              Outreach
+            </Button>
+          ) : null,
+      },
+    ],
+    [openOutreachForRow],
+  );
+
+  const activeOutreachTarget =
+    outreachTargets.find((target) => target.id === activeOutreachTargetId) ?? outreachTargets[0] ?? null;
+  const activeOutreachListing = activeOutreachTarget
+    ? listings.find((listing) => listing.id === activeOutreachTarget.listingId) ?? null
+    : null;
+  const selectedOutreachContact = activeOutreachTarget
+    ? activeOutreachTarget.contacts.find((contact) => contact.id === activeOutreachTarget.selectedContactId) ??
+      activeOutreachTarget.contacts[0] ??
+      null
+    : null;
+
+  const generateOutreachEmail = useCallback(async () => {
+    if (!activeOutreachTarget) return;
+    const listing = listings.find((item) => item.id === activeOutreachTarget.listingId);
+    if (!listing) {
+      setOutreachError("Listing context is missing for this outreach target.");
+      return;
+    }
+
+    updateOutreachTarget(activeOutreachTarget.id, (target) => ({ ...target, generatingEmail: true }));
+    setOutreachError(null);
+
+    try {
+      const contact =
+        activeOutreachTarget.contacts.find((item) => item.id === activeOutreachTarget.selectedContactId) ??
+        activeOutreachTarget.contacts[0] ??
+        null;
+
+      const response = await fetch("/api/outreach/generate-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          listing,
+          workbookRow: activeOutreachTarget.workbookRow,
+          contact,
+        }),
+      });
+
+      const payload = (await response.json()) as { error?: string; subject?: string; body?: string };
+      if (!response.ok || !payload.subject || !payload.body) {
+        throw new Error(payload.error ?? "Could not generate outreach email.");
+      }
+
+      updateOutreachTarget(activeOutreachTarget.id, (target) => ({
+        ...target,
+        generatingEmail: false,
+        emailSubject: payload.subject ?? target.emailSubject,
+        emailBody: payload.body ?? target.emailBody,
+      }));
+    } catch (error) {
+      updateOutreachTarget(activeOutreachTarget.id, (target) => ({ ...target, generatingEmail: false }));
+      setOutreachError(error instanceof Error ? error.message : "Could not generate outreach email.");
+    }
+  }, [activeOutreachTarget, listings, updateOutreachTarget]);
+
+  const sendOutreachEmail = useCallback(async () => {
+    if (!activeOutreachTarget) return;
+
+    const contact =
+      activeOutreachTarget.contacts.find((item) => item.id === activeOutreachTarget.selectedContactId) ??
+      activeOutreachTarget.contacts[0] ??
+      null;
+
+    if (!contact?.email) {
+      setOutreachError("Select a contact with an email before sending.");
+      return;
+    }
+
+    if (!activeOutreachTarget.emailSubject.trim() || !activeOutreachTarget.emailBody.trim()) {
+      setOutreachError("Generate or write an email before sending.");
+      return;
+    }
+
+    setOutreachError(null);
+    updateOutreachTarget(activeOutreachTarget.id, (target) => ({ ...target, sendingEmail: true }));
+
+    try {
+      const response = await fetch("/api/outreach/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: contact.email,
+          subject: activeOutreachTarget.emailSubject,
+          body: activeOutreachTarget.emailBody,
+        }),
+      });
+
+      const payload = (await response.json()) as { error?: string; id?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to send email.");
+      }
+
+      updateOutreachTarget(activeOutreachTarget.id, (target) => ({
+        ...target,
+        sendingEmail: false,
+        lastSendStatus: "sent",
+        lastSendMessage: payload.id ? `Sent (message ${payload.id})` : "Sent",
+      }));
+    } catch (error) {
+      updateOutreachTarget(activeOutreachTarget.id, (target) => ({
+        ...target,
+        sendingEmail: false,
+        lastSendStatus: "failed",
+        lastSendMessage: error instanceof Error ? error.message : "Failed to send email.",
+      }));
+      setOutreachError(error instanceof Error ? error.message : "Failed to send email.");
+    }
+  }, [activeOutreachTarget, updateOutreachTarget]);
 
   return (
     <main className={`app-shell ${sidebarCollapsed ? "collapsed" : ""}`}>
@@ -463,6 +668,33 @@ export default function HomePage() {
                           />
                         </section>
 
+                        <section style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+                          <label style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 10, background: "#fcfdff", display: "grid", gap: 6 }}>
+                            <span style={{ color: "#64748b", fontSize: 12, fontWeight: 600 }}>
+                              What are you willing to offer the right tenant?
+                            </span>
+                            <Textarea
+                              rows={3}
+                              value={listing.ownerProvisions ?? ""}
+                              onChange={(event) =>
+                                updateListing(listing.id, (current) => ({ ...current, ownerProvisions: event.target.value }))
+                              }
+                              placeholder="Free rent, TI allowance, landlord buildout, rent ramp, flexible options"
+                            />
+                          </label>
+                          <MetricEditor
+                            label="Lease Term Length (Years)"
+                            value={listing.leaseTermYears != null ? String(listing.leaseTermYears) : ""}
+                            onChange={(next) =>
+                              updateListing(listing.id, (current) => ({
+                                ...current,
+                                leaseTermYears: toNumber(next.replace(/[^\d.]/g, "")),
+                              }))
+                            }
+                            placeholder="5"
+                          />
+                        </section>
+
                         <section style={{ display: "flex", justifyContent: "flex-end" }}>
                           <Button
                             onClick={() => createWorkbookForListing(listing)}
@@ -510,7 +742,7 @@ export default function HomePage() {
               <div className="ag-theme-quartz" style={{ width: "100%", height: 580 }}>
                 <AgGridReact
                   rowData={activeWorkbook.rows}
-                  columnDefs={WORKBOOK_COL_DEFS}
+                  columnDefs={workbookColDefs}
                   pagination
                   paginationPageSize={25}
                   animateRows
@@ -524,7 +756,147 @@ export default function HomePage() {
           </section>
         ) : null}
         {primaryTab === "proposals" ? <section /> : null}
-        {primaryTab === "outreach" ? <section /> : null}
+        {primaryTab === "outreach" ? (
+          <section className="card" style={{ padding: 16, display: "grid", gap: 14 }}>
+            {activeOutreachTarget ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <strong>Outreach Workspace · {activeOutreachTarget.workbookRow.business_name}</strong>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <UiSelect
+                      value={activeOutreachTarget.id}
+                      onChange={(event) => setActiveOutreachTargetId(event.target.value)}
+                      style={{ minWidth: 280 }}
+                    >
+                      {outreachTargets.map((target) => (
+                        <option key={target.id} value={target.id}>
+                          {target.workbookRow.business_name} · {target.workbookRow.city}, {target.workbookRow.state}
+                        </option>
+                      ))}
+                    </UiSelect>
+                  </div>
+                </div>
+
+                <Card>
+                  <CardContent style={{ padding: 16, display: "grid", gap: 12 }}>
+                    <div style={{ fontWeight: 700 }}>Business Detail Card</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+                      <MetricBox label="Business" value={activeOutreachTarget.workbookRow.business_name} />
+                      <MetricBox label="Category" value={activeOutreachTarget.workbookRow.category} />
+                      <MetricBox label="Location" value={`${activeOutreachTarget.workbookRow.city}, ${activeOutreachTarget.workbookRow.state}`} />
+                      <MetricBox label="Distance" value={`${activeOutreachTarget.workbookRow.distance_miles} mi`} />
+                      <MetricBox label="Fit" value={`${activeOutreachTarget.workbookRow.tenant_fit_score_100}/100`} />
+                      <MetricBox label="Move Probability" value={`${activeOutreachTarget.workbookRow.move_probability_1_10}/10`} />
+                      <MetricBox label="Business Age" value={activeOutreachTarget.businessAgeYears != null ? `${activeOutreachTarget.businessAgeYears} yrs` : "TBD"} />
+                      <MetricBox label="Industry" value={activeOutreachTarget.industry ?? "TBD"} />
+                      <MetricBox label="Parent Company" value={activeOutreachTarget.parentCompany ?? "Independent / TBD"} />
+                      <MetricBox label="Revenue" value={activeOutreachTarget.estimatedRevenue ?? "TBD"} />
+                      <MetricBox label="HQ Address" value={activeOutreachTarget.hqAddress ?? "TBD"} />
+                      <MetricBox label="Listing" value={activeOutreachListing?.addressLine1 ?? activeOutreachTarget.workbookRow.city} />
+                    </div>
+                    <div style={{ color: "#334155", fontSize: 13 }}>
+                      <strong>Fit Summary:</strong> {activeOutreachTarget.workbookRow.fit_summary}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <div style={{ display: "grid", gap: 14, gridTemplateColumns: "2fr 1fr" }}>
+                  <Card>
+                    <CardContent style={{ padding: 16, display: "grid", gap: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                        <strong>Email Composer</strong>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <Button
+                            variant="secondary"
+                            onClick={generateOutreachEmail}
+                            disabled={activeOutreachTarget.generatingEmail}
+                          >
+                            {activeOutreachTarget.generatingEmail ? "Generating..." : "Generate with 4o"}
+                          </Button>
+                          <Button
+                            onClick={sendOutreachEmail}
+                            disabled={activeOutreachTarget.sendingEmail}
+                          >
+                            {activeOutreachTarget.sendingEmail ? "Sending..." : "Send via Gmail"}
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div style={{ fontSize: 12, color: "#475569" }}>
+                        To: {selectedOutreachContact?.name ?? "Select a contact"}
+                        {selectedOutreachContact?.email ? ` <${selectedOutreachContact.email}>` : ""}
+                      </div>
+
+                      <MetricEditor
+                        label="Subject"
+                        value={activeOutreachTarget.emailSubject}
+                        onChange={(next) =>
+                          updateOutreachTarget(activeOutreachTarget.id, (target) => ({ ...target, emailSubject: next }))
+                        }
+                        placeholder="Expansion opportunity at [Address]"
+                      />
+
+                      <label style={{ display: "grid", gap: 6 }}>
+                        <span style={{ color: "#64748b", fontSize: 12, fontWeight: 600 }}>Email Body</span>
+                        <Textarea
+                          rows={14}
+                          value={activeOutreachTarget.emailBody}
+                          onChange={(event) =>
+                            updateOutreachTarget(activeOutreachTarget.id, (target) => ({ ...target, emailBody: event.target.value }))
+                          }
+                        />
+                      </label>
+
+                      <div style={{ fontSize: 12, color: activeOutreachTarget.lastSendStatus === "failed" ? "#b91c1c" : "#475569" }}>
+                        {activeOutreachTarget.lastSendMessage || "Gmail send uses GMAIL_ACCESS_TOKEN + GMAIL_FROM_EMAIL environment configuration."}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardContent style={{ padding: 16, display: "grid", gap: 10 }}>
+                      <strong>Suggested Contacts</strong>
+                      {activeOutreachTarget.contacts.map((contact) => {
+                        const selected = contact.id === activeOutreachTarget.selectedContactId;
+                        return (
+                          <button
+                            key={contact.id}
+                            className="btn secondary"
+                            style={{
+                              textAlign: "left",
+                              justifyContent: "flex-start",
+                              borderColor: selected ? "#2563eb" : undefined,
+                              background: selected ? "#dbeafe" : undefined,
+                            }}
+                            onClick={() =>
+                              updateOutreachTarget(activeOutreachTarget.id, (target) => ({
+                                ...target,
+                                selectedContactId: contact.id,
+                              }))
+                            }
+                          >
+                            <div style={{ display: "grid", gap: 2 }}>
+                              <div style={{ fontWeight: 700 }}>{contact.name}</div>
+                              <div style={{ fontSize: 12, color: "#475569" }}>{contact.title}</div>
+                              <div style={{ fontSize: 12, color: "#475569" }}>{contact.email ?? "Email TBD"}</div>
+                              <div style={{ fontSize: 11, color: "#64748b" }}>Confidence: {contact.confidence}</div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {outreachError ? <div style={{ color: "#b91c1c", fontSize: 12 }}>{outreachError}</div> : null}
+              </>
+            ) : (
+              <div style={{ color: "#64748b", fontSize: 13 }}>
+                No outreach targets yet. Open a workbook and click <strong>Outreach</strong> on a company row.
+              </div>
+            )}
+          </section>
+        ) : null}
 
         {addMode ? (
           <AddListingModal
@@ -1058,6 +1430,12 @@ function parseListingDetailsToRecord(text: string): ListingRecord | null {
   const buildingSize = toNumber(matchValue(raw, /Building Size\s*([\d,]+)\s*SF/i)?.replace(/,/g, ""));
   const lotSizeAcres = toNumber(matchValue(raw, /([\d.]+)\s*AC\b/i));
   const rentalRate = toNumber(matchValue(raw, /Rental Rate\s*\$?([\d,.]+)\s*\/SF\/YR/i)?.replace(/,/g, ""));
+  const leaseTermYears = toNumber(
+    matchValue(raw, /(?:Lease\s*Term|Term)\s*:?\s*(\d+(?:\.\d+)?)\s*(?:year|yr)s?/i),
+  );
+  const ownerProvisions =
+    matchValue(raw, /(?:Owner\s*Provisions|Landlord\s*Provisions|Incentives|Concessions)\s*:?\s*([^\n\r]+)/i) ??
+    undefined;
   const spaces = parseLoopNetSpaces(raw);
   const features = parseLoopNetFeatures(raw);
   const disclosures = parseLoopNetDisclosures(raw);
@@ -1084,6 +1462,8 @@ function parseListingDetailsToRecord(text: string): ListingRecord | null {
     lastUpdatedAtSource,
     daysOnMarket,
     rawDetails: raw,
+    ownerProvisions,
+    leaseTermYears,
     spaces,
     disclosures,
     features,
@@ -1316,6 +1696,51 @@ function buildAutoSummary(listing: ListingRecord): string {
   ].filter(Boolean);
 
   return `${clauses.join(" ")}`.trim();
+}
+
+function slugifyForId(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+}
+
+function buildSuggestedContacts(row: WorkbookRow, fallbackName?: string): OutreachContact[] {
+  const base = slugifyForId(row.business_name) || "target";
+  const firstName = row.business_name.split(/\s+/)[0] || "Team";
+
+  const seeded: OutreachContact[] = [
+    {
+      id: `${base}_ops`,
+      name: fallbackName ?? `${firstName} Operations Team`,
+      title: "Operations Lead",
+      email: `${base}.ops@example.com`,
+      confidence: fallbackName ? "high" : "medium",
+    },
+    {
+      id: `${base}_realestate`,
+      name: `${firstName} Real Estate`,
+      title: "Real Estate Manager",
+      email: `${base}.realestate@example.com`,
+      confidence: "medium",
+    },
+    {
+      id: `${base}_exec`,
+      name: `${firstName} Executive Office`,
+      title: "Executive Contact",
+      email: undefined,
+      confidence: "low",
+    },
+  ];
+
+  const unique = new Set<string>();
+  return seeded.filter((contact) => {
+    const key = `${contact.name}_${contact.title}`;
+    if (unique.has(key)) return false;
+    unique.add(key);
+    return true;
+  });
 }
 
 function formatListingAddress(listing: ListingRecord): string {

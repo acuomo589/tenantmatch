@@ -72,6 +72,8 @@ model Listing {
   parseConfidence   Decimal?  @map("parse_confidence") @db.Decimal(5, 4)
   parseWarningsJson Json?     @map("parse_warnings_json")
   rawSourceText     String?   @map("raw_source_text")
+  ownerProvisions   String?   @map("owner_provisions")
+  leaseTermYears    Int?      @map("lease_term_years")
   title             String
   addressLine1      String    @map("address_line_1")
   addressLine2      String?   @map("address_line_2")

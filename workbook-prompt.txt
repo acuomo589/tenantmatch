@@ -121,6 +121,7 @@ For each tenant, evaluate in this order:
      - Flexible terms
      - LL buildout / infrastructure
      - % rent / step-ups
+   - If listing context includes ownerProvisions and/or leaseTermYears, explicitly use them in incentive feasibility and fit ranking.
 
 5. Move Drivers
    - Expansion
