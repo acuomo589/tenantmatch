@@ -86,6 +86,8 @@ const parserSchema = {
   strict: false,
 } as const;
 
+class RetryableParserError extends Error {}
+
 function normalizeParsedListing(parsed: ParsedListing): ListingRecordLike {
   const features = (parsed.features ?? [])
     .map((feature) => feature.featureValueText?.trim() ?? "")
@@ -142,97 +144,117 @@ export async function runStructuredListingParser(rawText: string, signal?: Abort
     rawTextLength: rawText.length,
   });
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.openAiApiKey}`,
-    },
-    body: JSON.stringify({
-      model: config.listingParserModel,
-      input: [
-        {
-          role: "system",
-          content:
-            "Extract commercial listing details into strict JSON. Prefer concrete values from text. Set addressLine1 to the street address. For locationDescription, capture the strongest location/access phrase from the source text (e.g., near highways, routes, turnpike, transit, or logistics corridors). Also extract ownerProvisions as what ownership is willing to offer the right tenant (e.g., free rent, TI allowance, landlord buildout, rent ramp, flexible term) and leaseTermYears when explicitly stated. Leave missing fields empty.",
-        },
-        {
-          role: "user",
-          content: rawText,
-        },
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: parserSchema.name,
-          schema: parserSchema.schema,
-          strict: false,
-        },
+  const maxAttempts = 2;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.openAiApiKey}`,
       },
-      max_output_tokens: 1500,
-    }),
-    signal,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("[runStructuredListingParser] upstream failure", {
-      status: response.status,
-      bodyPreview: errorText.slice(0, 800),
+      body: JSON.stringify({
+        model: config.listingParserModel,
+        input: [
+          {
+            role: "system",
+            content:
+              "Extract commercial listing details into strict JSON. Prefer concrete values from text. Set addressLine1 to the street address. For locationDescription, capture the strongest location/access phrase from the source text (e.g., near highways, routes, turnpike, transit, or logistics corridors). Also extract ownerProvisions as what ownership is willing to offer the right tenant (e.g., free rent, TI allowance, landlord buildout, rent ramp, flexible term) and leaseTermYears when explicitly stated. Leave missing fields empty.",
+          },
+          {
+            role: "user",
+            content: rawText,
+          },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: parserSchema.name,
+            schema: parserSchema.schema,
+            strict: false,
+          },
+        },
+        max_output_tokens: 3000,
+      }),
+      signal,
     });
-    throw new Error(`Listing parser failed: ${response.status} ${errorText}`);
-  }
 
-  const payload = (await response.json()) as {
-    output_text?: string;
-    output_parsed?: unknown;
-    output?: Array<{
-      content?: Array<{
-        type?: string;
-        text?: string;
-        json?: unknown;
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("[runStructuredListingParser] upstream failure", {
+        status: response.status,
+        bodyPreview: errorText.slice(0, 800),
+        attempt,
+      });
+      throw new Error(`Listing parser failed: ${response.status} ${errorText}`);
+    }
+
+    const payload = (await response.json()) as {
+      output_text?: string;
+      output_parsed?: unknown;
+      output?: Array<{
+        content?: Array<{
+          type?: string;
+          text?: string;
+          json?: unknown;
+        }>;
       }>;
-    }>;
-  };
+    };
 
-  if (payload.output_parsed && typeof payload.output_parsed === "object") {
-    console.info("[runStructuredListingParser] using output_parsed object");
-    return normalizeParsedListing(payload.output_parsed as ParsedListing);
+    if (payload.output_parsed && typeof payload.output_parsed === "object") {
+      console.info("[runStructuredListingParser] using output_parsed object", { attempt });
+      return normalizeParsedListing(payload.output_parsed as ParsedListing);
+    }
+
+    const extractedText =
+      (typeof payload.output_text === "string" ? payload.output_text : undefined) ??
+      payload.output
+        ?.flatMap((item) => item.content ?? [])
+        .map((part) => {
+          if (typeof part.text === "string") return part.text;
+          if ((part.type === "output_json" || part.type === "json") && part.json != null) {
+            return JSON.stringify(part.json);
+          }
+          return undefined;
+        })
+        .find((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+    if (!extractedText) {
+      const error = new RetryableParserError("Listing parser did not return parseable output.");
+      if (attempt < maxAttempts) {
+        console.warn("[runStructuredListingParser] retrying after missing output_parsed / parseable text", {
+          attempt,
+          hasOutputText: typeof payload.output_text === "string",
+          outputItems: payload.output?.length ?? 0,
+        });
+        continue;
+      }
+      throw error;
+    }
+
+    try {
+      const parsed = JSON.parse(extractedText) as ParsedListing;
+      console.warn("[runStructuredListingParser] fallback to JSON text parse (output_parsed missing)", {
+        attempt,
+        extractedLength: extractedText.length,
+      });
+      return normalizeParsedListing(parsed);
+    } catch {
+      if (attempt < maxAttempts) {
+        console.warn("[runStructuredListingParser] retrying after JSON parse failure", {
+          attempt,
+          extractedPreview: extractedText.slice(0, 400),
+        });
+        continue;
+      }
+
+      console.error("[runStructuredListingParser] JSON parse failure", {
+        extractedPreview: extractedText.slice(0, 800),
+        attempt,
+      });
+      throw new Error("Listing parser returned invalid JSON.");
+    }
   }
 
-  const extractedText =
-    (typeof payload.output_text === "string" ? payload.output_text : undefined) ??
-    payload.output
-      ?.flatMap((item) => item.content ?? [])
-      .map((part) => {
-        if (typeof part.text === "string") return part.text;
-        if ((part.type === "output_json" || part.type === "json") && part.json != null) {
-          return JSON.stringify(part.json);
-        }
-        return undefined;
-      })
-      .find((value): value is string => typeof value === "string" && value.trim().length > 0);
-
-  if (!extractedText) {
-    console.error("[runStructuredListingParser] missing parseable output", {
-      hasOutputText: typeof payload.output_text === "string",
-      outputItems: payload.output?.length ?? 0,
-    });
-    throw new Error("Listing parser did not return parseable output.");
-  }
-
-  let parsed: ParsedListing;
-  try {
-    parsed = JSON.parse(extractedText) as ParsedListing;
-  } catch {
-    console.error("[runStructuredListingParser] JSON parse failure", {
-      extractedPreview: extractedText.slice(0, 800),
-    });
-    throw new Error("Listing parser returned invalid JSON.");
-  }
-
-  console.info("[runStructuredListingParser] parsed JSON output text", {
-    extractedLength: extractedText.length,
-  });
-  return normalizeParsedListing(parsed);
+  throw new Error("Listing parser failed after retry.");
 }

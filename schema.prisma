@@ -7,6 +7,32 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum TenantRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum PlanCode {
+  FREE
+  PLUS
+  PRO
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+}
+
+enum UsageMetric {
+  LISTINGS
+  CONTACTS
+  WORKBOOKS
+  WORKBOOK_ROWS
+}
+
 enum RunStatus {
   RUNNING
   SUCCEEDED
@@ -51,12 +77,15 @@ enum ListingTextSource {
 
 model Project {
   id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
   name      String
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   listings  Listing[]
   threads   Thread[]
 
+  @@index([tenantId, updatedAt])
   @@map("projects")
 }
 
@@ -298,4 +327,102 @@ model Message {
 
   @@index([threadId, createdAt])
   @@map("messages")
+}
+
+model AppUser {
+  id           String             @id @db.Uuid
+  email        String             @unique
+  fullName     String?            @map("full_name")
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  memberships  TenantMembership[]
+
+  @@map("app_users")
+}
+
+model Tenant {
+  id             String               @id @default(uuid()) @db.Uuid
+  name           String
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  memberships    TenantMembership[]
+  projects       Project[]
+  subscriptions  TenantSubscription[]
+  usageCounters  UsageCounter[]
+  workspaceState WorkspaceState?
+
+  @@map("tenants")
+}
+
+model TenantMembership {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  role       TenantRole @default(MEMBER)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       AppUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([userId, createdAt])
+  @@map("tenant_memberships")
+}
+
+model Plan {
+  id                  String               @id @default(uuid()) @db.Uuid
+  code                PlanCode             @unique
+  name                String
+  monthlyPriceCents   Int                  @default(0) @map("monthly_price_cents")
+  limitsJson          Json                 @map("limits_json")
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  subscriptions       TenantSubscription[]
+
+  @@map("plans")
+}
+
+model TenantSubscription {
+  id                  String              @id @default(uuid()) @db.Uuid
+  tenantId            String              @map("tenant_id") @db.Uuid
+  planId              String              @map("plan_id") @db.Uuid
+  status              SubscriptionStatus  @default(ACTIVE)
+  stripeCustomerId    String?             @map("stripe_customer_id")
+  stripeSubscriptionId String?            @map("stripe_subscription_id")
+  currentPeriodStart  DateTime            @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd    DateTime            @map("current_period_end") @db.Timestamptz(6)
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan                Plan                @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, status, updatedAt])
+  @@index([stripeSubscriptionId])
+  @@map("tenant_subscriptions")
+}
+
+model UsageCounter {
+  id          String      @id @default(uuid()) @db.Uuid
+  tenantId    String      @map("tenant_id") @db.Uuid
+  metric      UsageMetric
+  periodStart DateTime    @map("period_start") @db.Date
+  value       Int         @default(0)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, metric, periodStart])
+  @@index([tenantId, periodStart])
+  @@map("usage_counters")
+}
+
+model WorkspaceState {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @unique @map("tenant_id") @db.Uuid
+  stateJson Json     @map("state_json")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("workspace_states")
 }

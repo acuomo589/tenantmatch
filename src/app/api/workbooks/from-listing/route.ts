@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getAiConfig } from "@/lib/ai/config";
+import { consumeEntitlement, EntitlementError } from "@/lib/billing/entitlements";
+import { requireTenantContext } from "@/lib/auth/requestContext";
 import { parseWorkbookCsv } from "@/lib/workbookCsv";
 
 type ListingInput = {
@@ -138,6 +140,7 @@ async function repairWorkbookCsv(args: {
 export async function POST(request: Request) {
   const requestId = `workbook_${Math.random().toString(36).slice(2, 8)}`;
   try {
+    const context = await requireTenantContext();
     const body = (await request.json()) as { listing?: ListingInput };
     const listing = body.listing;
     if (!listing?.addressLine1) {
@@ -319,12 +322,29 @@ export async function POST(request: Request) {
       );
     }
 
+    await consumeEntitlement({
+      tenantId: context.tenantId,
+      metric: "WORKBOOKS",
+      increment: 1,
+    });
+    await consumeEntitlement({
+      tenantId: context.tenantId,
+      metric: "WORKBOOK_ROWS",
+      increment: rows.length,
+    });
+
     console.info("[workbooks/from-listing] request succeeded", {
       requestId,
       rowCount: rows.length,
     });
     return NextResponse.json({ csv, rows });
   } catch (error) {
+    if (error instanceof EntitlementError) {
+      return NextResponse.json({ error: error.message, details: error.details }, { status: 402 });
+    }
+    if (error instanceof Error && error.message === "UNAUTHORIZED") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const message = error instanceof Error ? error.message : "Unexpected workbook generation failure";
     console.error("[workbooks/from-listing] unexpected failure", {
       requestId,

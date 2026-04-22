@@ -2,7 +2,7 @@ import { BASE_PROMPT } from "@/lib/ai/prompt";
 import type { CandidateRow, ChatMessage, ListingIntake, ListingThread } from "@/lib/types";
 
 interface ThreadStore {
-  threads: Map<string, ListingThread>;
+  threadsByTenant: Map<string, Map<string, ListingThread>>;
 }
 
 declare global {
@@ -12,7 +12,7 @@ declare global {
 
 const store: ThreadStore =
   globalThis.__timpani_store__ ?? {
-    threads: new Map<string, ListingThread>(),
+    threadsByTenant: new Map<string, Map<string, ListingThread>>(),
   };
 
 if (!globalThis.__timpani_store__) {
@@ -28,16 +28,27 @@ function id(prefix: string): string {
 }
 
 export function listThreads(): ListingThread[] {
-  return [...store.threads.values()].sort((a, b) =>
+  return [...store.threadsByTenant.values()]
+    .flatMap((threads) => [...threads.values()])
+    .sort((a, b) =>
     b.updatedAt.localeCompare(a.updatedAt),
-  );
+    );
 }
 
-export function getThread(threadId: string): ListingThread | null {
-  return store.threads.get(threadId) ?? null;
+function getTenantThreads(tenantId: string) {
+  const existing = store.threadsByTenant.get(tenantId);
+  if (existing) return existing;
+
+  const seeded = new Map<string, ListingThread>();
+  store.threadsByTenant.set(tenantId, seeded);
+  return seeded;
 }
 
-export function createThread(intake: ListingIntake): ListingThread {
+export function getThread(tenantId: string, threadId: string): ListingThread | null {
+  return getTenantThreads(tenantId).get(threadId) ?? null;
+}
+
+export function createThread(tenantId: string, intake: ListingIntake): ListingThread {
   const ts = nowIso();
   const thread: ListingThread = {
     id: id("thread"),
@@ -59,17 +70,18 @@ export function createThread(intake: ListingIntake): ListingThread {
     rawCsv: "",
   };
 
-  store.threads.set(thread.id, thread);
+  getTenantThreads(tenantId).set(thread.id, thread);
   return thread;
 }
 
-export function updateThread(thread: ListingThread): ListingThread {
+export function updateThread(tenantId: string, thread: ListingThread): ListingThread {
   thread.updatedAt = nowIso();
-  store.threads.set(thread.id, thread);
+  getTenantThreads(tenantId).set(thread.id, thread);
   return thread;
 }
 
 export function addMessage(
+  tenantId: string,
   thread: ListingThread,
   role: ChatMessage["role"],
   content: string,
@@ -80,20 +92,21 @@ export function addMessage(
     content,
     createdAt: nowIso(),
   });
-  return updateThread(thread);
+  return updateThread(tenantId, thread);
 }
 
 export function setRunOutput(
+  tenantId: string,
   thread: ListingThread,
   candidates: CandidateRow[],
   rawCsv: string,
 ): ListingThread {
   thread.candidates = candidates;
   thread.rawCsv = rawCsv;
-  return updateThread(thread);
+  return updateThread(tenantId, thread);
 }
 
-export function cloneThread(thread: ListingThread): ListingThread {
+export function cloneThread(tenantId: string, thread: ListingThread): ListingThread {
   const ts = nowIso();
   const cloned: ListingThread = {
     ...thread,
@@ -110,6 +123,10 @@ export function cloneThread(thread: ListingThread): ListingThread {
       },
     ],
   };
-  store.threads.set(cloned.id, cloned);
+  getTenantThreads(tenantId).set(cloned.id, cloned);
   return cloned;
+}
+
+export function listThreadsForTenant(tenantId: string): ListingThread[] {
+  return [...getTenantThreads(tenantId).values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }

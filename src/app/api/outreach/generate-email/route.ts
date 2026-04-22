@@ -43,102 +43,149 @@ export async function POST(request: Request) {
       .filter(Boolean)
       .join(", ");
 
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.openAiApiKey}`,
-      },
-      body: JSON.stringify({
-        model: config.outreachEmailModel,
-        input: [
-          {
-            role: "system",
-            content:
-              "You are an outreach email agent for commercial real estate leasing. Generate a concise, professional outbound email tailored to one target business. Return STRICT JSON only with keys: subject (string), body (string). Body must be plain text, no markdown. Keep under 300 words.",
-          },
-          {
-            role: "user",
-            content: JSON.stringify(
-              {
-                request: "Generate a first-touch leasing outreach email",
-                listing: {
-                  title: body.listing.title,
-                  address: listingAddress,
-                  propertyClass: body.listing.propertyClass,
-                  listingSummary: body.listing.listingSummary,
-                  ownerProvisions: body.listing.ownerProvisions,
-                  leaseTermYears: body.listing.leaseTermYears,
-                },
-                targetBusiness: body.workbookRow,
-                selectedContact: body.contact,
-                styleReference:
-                  "Start with location + opportunity, mention fit based on operational context, mention owner flexibility/provisions when available, and close with a specific CTA for a quick call this week.",
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: "outreach_email",
-            schema: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                subject: { type: "string" },
-                body: { type: "string" },
-              },
-              required: ["subject", "body"],
-            },
-            strict: true,
-          },
+    const maxAttempts = 2;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.openAiApiKey}`,
         },
-        max_output_tokens: 1200,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("[outreach/generate-email] upstream failure", {
-        requestId,
-        status: response.status,
-        bodyPreview: errorText.slice(0, 600),
+        body: JSON.stringify({
+          model: config.outreachEmailModel,
+          input: [
+            {
+              role: "system",
+              content:
+                "You are an outreach email agent for commercial real estate leasing. Generate a concise, professional outbound email tailored to one target business. Return STRICT JSON only with keys: subject (string), body (string). Body must be plain text, no markdown. Keep under 300 words.",
+            },
+            {
+              role: "user",
+              content: JSON.stringify(
+                {
+                  request: "Generate a first-touch leasing outreach email",
+                  listing: {
+                    title: body.listing.title,
+                    address: listingAddress,
+                    propertyClass: body.listing.propertyClass,
+                    listingSummary: body.listing.listingSummary,
+                    ownerProvisions: body.listing.ownerProvisions,
+                    leaseTermYears: body.listing.leaseTermYears,
+                  },
+                  targetBusiness: body.workbookRow,
+                  selectedContact: body.contact,
+                  styleReference:
+                    "Start with location + opportunity, mention fit based on operational context, mention owner flexibility/provisions when available, and close with a specific CTA for a quick call this week.",
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          text: {
+            format: {
+              type: "json_schema",
+              name: "outreach_email",
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  subject: { type: "string" },
+                  body: { type: "string" },
+                },
+                required: ["subject", "body"],
+              },
+              strict: true,
+            },
+          },
+          max_output_tokens: 1200,
+        }),
       });
-      return NextResponse.json({ error: `Email generation failed: ${response.status}` }, { status: 500 });
-    }
 
-    const payload = (await response.json()) as {
-      output_parsed?: unknown;
-      output_text?: string;
-    };
-
-    let subject = "";
-    let emailBody = "";
-
-    if (payload.output_parsed && typeof payload.output_parsed === "object") {
-      const parsed = payload.output_parsed as { subject?: unknown; body?: unknown };
-      subject = typeof parsed.subject === "string" ? parsed.subject.trim() : "";
-      emailBody = typeof parsed.body === "string" ? parsed.body.trim() : "";
-    }
-
-    if ((!subject || !emailBody) && typeof payload.output_text === "string") {
-      try {
-        const fallback = JSON.parse(payload.output_text) as { subject?: unknown; body?: unknown };
-        subject = subject || (typeof fallback.subject === "string" ? fallback.subject.trim() : "");
-        emailBody = emailBody || (typeof fallback.body === "string" ? fallback.body.trim() : "");
-      } catch {
-        // ignore
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("[outreach/generate-email] upstream failure", {
+          requestId,
+          status: response.status,
+          bodyPreview: errorText.slice(0, 600),
+          attempt,
+        });
+        return NextResponse.json({ error: `Email generation failed: ${response.status}` }, { status: 500 });
       }
-    }
 
-    if (!subject || !emailBody) {
+      const payload = (await response.json()) as {
+        output_parsed?: unknown;
+        output_text?: string;
+        output?: Array<{
+          content?: Array<{
+            type?: string;
+            text?: string;
+            json?: unknown;
+          }>;
+        }>;
+      };
+
+      let subject = "";
+      let emailBody = "";
+
+      if (payload.output_parsed && typeof payload.output_parsed === "object") {
+        const parsed = payload.output_parsed as { subject?: unknown; body?: unknown };
+        subject = typeof parsed.subject === "string" ? parsed.subject.trim() : "";
+        emailBody = typeof parsed.body === "string" ? parsed.body.trim() : "";
+      }
+
+      const extractedText =
+        (typeof payload.output_text === "string" ? payload.output_text : undefined) ??
+        payload.output
+          ?.flatMap((item) => item.content ?? [])
+          .map((part) => {
+            if (typeof part.text === "string") return part.text;
+            if ((part.type === "output_json" || part.type === "json") && part.json != null) {
+              return JSON.stringify(part.json);
+            }
+            return undefined;
+          })
+          .find((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+      if ((!subject || !emailBody) && typeof extractedText === "string") {
+        try {
+          const fallback = JSON.parse(extractedText) as { subject?: unknown; body?: unknown };
+          subject = subject || (typeof fallback.subject === "string" ? fallback.subject.trim() : "");
+          emailBody = emailBody || (typeof fallback.body === "string" ? fallback.body.trim() : "");
+        } catch {
+          // ignore
+        }
+      }
+
+      if (subject && emailBody) {
+        return NextResponse.json({ subject, body: emailBody });
+      }
+
+      if (attempt < maxAttempts) {
+        console.warn("[outreach/generate-email] retrying after invalid model payload", {
+          requestId,
+          attempt,
+          hasOutputParsed: Boolean(payload.output_parsed),
+          hasOutputText: typeof payload.output_text === "string",
+          outputItems: payload.output?.length ?? 0,
+          extractedPreview: extractedText?.slice(0, 300),
+        });
+        continue;
+      }
+
+      console.error("[outreach/generate-email] model returned invalid payload", {
+        requestId,
+        attempt,
+        hasOutputParsed: Boolean(payload.output_parsed),
+        hasOutputText: typeof payload.output_text === "string",
+        outputItems: payload.output?.length ?? 0,
+        extractedPreview: extractedText?.slice(0, 300),
+      });
       return NextResponse.json({ error: "Model returned invalid email payload." }, { status: 500 });
     }
 
-    return NextResponse.json({ subject, body: emailBody });
+    return NextResponse.json({ error: "Model returned invalid email payload." }, { status: 500 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected outreach email generation failure";
     console.error("[outreach/generate-email] unexpected failure", { requestId, error: message });

@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
-import { listThreads } from "@/lib/store";
+import { listThreadsForTenant } from "@/lib/store";
+import { requireTenantContext } from "@/lib/auth/requestContext";
 
 export async function GET() {
-  return NextResponse.json({ threads: listThreads() });
+  try {
+    const context = await requireTenantContext();
+    return NextResponse.json({ threads: listThreadsForTenant(context.tenantId) });
+  } catch {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 }

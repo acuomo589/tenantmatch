@@ -2,10 +2,13 @@ import { NextResponse } from "next/server";
 import { runBasePrompt } from "@/lib/ai/runBasePrompt";
 import { parseAndNormalizeCsv, toCsv } from "@/lib/csv";
 import { addMessage, getThread, setRunOutput, updateThread } from "@/lib/store";
+import { consumeEntitlement, EntitlementError } from "@/lib/billing/entitlements";
+import { requireTenantContext } from "@/lib/auth/requestContext";
 import type { ChatRequest } from "@/lib/types";
 
 export async function POST(request: Request) {
   try {
+    const context = await requireTenantContext();
     const body = (await request.json()) as ChatRequest;
     if (!body.threadId || !body.message?.trim()) {
       return NextResponse.json(
@@ -14,12 +17,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const thread = getThread(body.threadId);
+    const thread = getThread(context.tenantId, body.threadId);
     if (!thread) {
       return NextResponse.json({ error: "Thread not found" }, { status: 404 });
     }
 
-    addMessage(thread, "user", body.message);
+    addMessage(context.tenantId, thread, "user", body.message);
 
     const refinementNotes = thread.messages
       .filter((message) => message.role === "user")
@@ -33,7 +36,7 @@ ${refinementNotes}
 
 Adjust candidate selection and ranking accordingly.`;
 
-    updateThread(thread);
+    updateThread(context.tenantId, thread);
 
     const run = await runBasePrompt({
       intake: thread.intake,
@@ -41,9 +44,16 @@ Adjust candidate selection and ranking accordingly.`;
     });
 
     const rows = parseAndNormalizeCsv(run.csv);
-    setRunOutput(thread, rows, toCsv(rows));
+    await consumeEntitlement({
+      tenantId: context.tenantId,
+      metric: "WORKBOOK_ROWS",
+      increment: rows.length,
+    });
+
+    setRunOutput(context.tenantId, thread, rows, toCsv(rows));
 
     addMessage(
+      context.tenantId,
       thread,
       "assistant",
       `Applied refinement and regenerated ${rows.length} candidates${run.usedMock ? " (mock mode)" : ""}.`,
@@ -51,6 +61,12 @@ Adjust candidate selection and ranking accordingly.`;
 
     return NextResponse.json({ thread });
   } catch (error) {
+    if (error instanceof EntitlementError) {
+      return NextResponse.json({ error: error.message, details: error.details }, { status: 402 });
+    }
+    if (error instanceof Error && error.message === "UNAUTHORIZED") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const message = error instanceof Error ? error.message : "Unexpected chat failure";
     return NextResponse.json({ error: message }, { status: 500 });
   }

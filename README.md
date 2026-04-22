@@ -37,6 +37,9 @@ Open `http://localhost:3000`.
 
 ## Env notes
 
+- `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` enable auth.
+- `DATABASE_URL` is required for tenant/workspace/billing persistence.
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PLUS`, and `STRIPE_PRICE_PRO` enable upgrade checkout + webhook syncing.
 - `AI_USE_MOCK=1` uses deterministic mock CSV output (default in example).
 - Set `AI_USE_MOCK=0` + `OPENAI_API_KEY` (or legacy `OPEN_API_KEY`) to call OpenAI.
 - `AI_LISTING_PARSER_MODEL` controls structured listing parse model (default `o3-mini`).
@@ -46,6 +49,8 @@ Open `http://localhost:3000`.
 - `AI_PROVIDER=vertex` is scaffolded but intentionally not wired in this proto.
 - `ATTOM_API_KEY` enables ATTOM Property API proxy routes.
 - Optional `ATTOM_BASE_URL` defaults to `https://api.gateway.attomdata.com`.
+- `NEXT_PUBLIC_LOCAL_PERSISTENCE=1` keeps listings/workbooks/outreach state in browser `localStorage` (set to `0` to disable).
+- `NEXT_PUBLIC_LOCAL_PERSISTENCE_MODE=server` (default) persists workspace state per tenant via `/api/workspace/state` in Postgres; set to `local` for browser-only.
 
 ## API routes
 
@@ -57,6 +62,17 @@ Open `http://localhost:3000`.
 - `GET /api/attom/property-v1/:operation` → proxy ATTOM Property V1 operations (`address`, `detail`, `basicprofile`, etc.)
 - `POST /api/listings/parse` → parse listing detail text into structured listing JSON (AI-first with fallback in UI)
 - `POST /api/workbooks/from-listing` → run `workbook-prompt.txt` against listing context and return workbook CSV + parsed rows
+- `GET /api/billing/usage` → current tenant plan + monthly usage counters
+- `POST /api/billing/checkout` → create Stripe checkout URL for PLUS/PRO upgrades
+- `POST /api/webhooks/stripe` → sync subscription status from Stripe events
+
+## Customer-ready baseline added
+
+- Supabase auth foundation (`/signup`, `/signin`, `/auth/callback`, middleware-guarded private routes)
+- Automatic tenant provisioning on first sign-in + tenant-aware request context
+- Tenant isolation applied to thread APIs and workspace state persistence
+- Plan entitlements enforced for listings, contacts, workbooks, and workbook rows
+- Pricing page + usage panel in workspace sidebar + Stripe checkout/webhook scaffolding
 
 ## Schema
 
