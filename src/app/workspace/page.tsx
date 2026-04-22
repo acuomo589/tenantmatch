@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, CSSProperties } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { BookOpen, Building2, ChevronLeft, Menu, MessageSquare, SquarePen, Upload, Search } from "lucide-react";
 import { AgGridReact } from "ag-grid-react";
 import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
@@ -33,6 +35,7 @@ type UsageSnapshot = {
 };
 
 type PrimaryTab = "listings" | "workbooks" | "proposals" | "outreach";
+type ListingsPathView = "cards" | "options";
 type AddMode = "chooser" | "upload" | "search" | "details";
 
 type ListingRecord = {
@@ -216,6 +219,7 @@ type PersistedWorkspace = {
   activeOutreachTargetId: string | null;
   activeExploreListingId: string | null;
   primaryTab: PrimaryTab;
+  listingsPathView: ListingsPathView;
 };
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -250,12 +254,14 @@ const LOCAL_PERSISTENCE_KEY = "timpani:workspace:v1";
 const PRIMARY_TABS: Array<{ id: PrimaryTab; label: string; icon: ComponentType<{ size?: number; strokeWidth?: number }> }> = [
   { id: "listings", label: "Listings", icon: Building2 },
   { id: "workbooks", label: "Workbooks", icon: BookOpen },
-  { id: "proposals", label: "Explore Options", icon: SquarePen },
+  { id: "proposals", label: "Proposals", icon: SquarePen },
   { id: "outreach", label: "Outreach / Inbox", icon: MessageSquare },
 ];
 
 export default function HomePage() {
+  const searchParams = useSearchParams();
   const [primaryTab, setPrimaryTab] = useState<PrimaryTab>("listings");
+  const [listingsPathView, setListingsPathView] = useState<ListingsPathView>("cards");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [addMode, setAddMode] = useState<AddMode | null>(null);
   const [listings, setListings] = useState<ListingRecord[]>([]);
@@ -316,6 +322,7 @@ export default function HomePage() {
         setActiveOutreachTargetId(persisted.activeOutreachTargetId);
         setActiveExploreListingId(persisted.activeExploreListingId);
         setPrimaryTab(persisted.primaryTab);
+        setListingsPathView(persisted.listingsPathView ?? "cards");
       }
 
       if (isMounted) {
@@ -329,6 +336,22 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (tabParam === "listings" || tabParam === "workbooks" || tabParam === "proposals" || tabParam === "outreach") {
+      setPrimaryTab(tabParam);
+    }
+
+    if (tabParam === "listings") {
+      const viewParam = searchParams.get("listingView");
+      const listingIdParam = searchParams.get("listingId");
+      setListingsPathView(viewParam === "options" ? "options" : "cards");
+      if (listingIdParam) {
+        setActiveExploreListingId(listingIdParam);
+      }
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     if (!LOCAL_PERSISTENCE_ENABLED || !didHydratePersistedState) return;
 
     const snapshot: PersistedWorkspace = {
@@ -340,6 +363,7 @@ export default function HomePage() {
       activeOutreachTargetId,
       activeExploreListingId,
       primaryTab,
+      listingsPathView,
     };
 
     writePersistedWorkspace(snapshot);
@@ -360,6 +384,7 @@ export default function HomePage() {
     activeOutreachTargetId,
     activeExploreListingId,
     primaryTab,
+    listingsPathView,
     didHydratePersistedState,
   ]);
 
@@ -437,18 +462,14 @@ export default function HomePage() {
 
       setExploreOptionsByListing((prev) => ({ ...prev, [listing.id]: result }));
       setActiveExploreListingId(listing.id);
-      setPrimaryTab("proposals");
+      setPrimaryTab("listings");
+      setListingsPathView("options");
       setListingInfoMessage(`Explore options ready for ${listing.title}.`);
     } catch (error) {
       setExploreOptionsError(error instanceof Error ? error.message : "Explore options generation failed.");
     } finally {
       setExploreOptionsLoadingListingId(null);
     }
-  };
-
-  const stubDraftProposal = (listingTitle: string, scenarioName: string) => {
-    setExploreOptionsError(null);
-    setListingInfoMessage(`Draft Proposal for ${listingTitle} · ${scenarioName} is stubbed.`);
   };
 
   const exportWorkbookCsv = (workbook: WorkbookResult) => {
@@ -784,7 +805,12 @@ export default function HomePage() {
               <button
                 key={tab.id}
                 className={`nav-item ${primaryTab === tab.id ? "active" : ""}`}
-                onClick={() => setPrimaryTab(tab.id)}
+                onClick={() => {
+                  setPrimaryTab(tab.id);
+                  if (tab.id !== "listings") {
+                    setListingsPathView("cards");
+                  }
+                }}
                 title={tab.label}
               >
                 <span className="nav-icon">
@@ -799,7 +825,112 @@ export default function HomePage() {
 
       <section className="app-main" style={{ minHeight: "100vh" }}>
         {primaryTab === "listings" ? (
-          listings.length === 0 ? (
+          listingsPathView === "options" ? (
+            <section className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <strong>Listings / Options</strong>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  {exploreOptionListings.length ? (
+                    <UiSelect
+                      value={activeExploreListing?.id ?? ""}
+                      onChange={(event) => setActiveExploreListingId(event.target.value)}
+                      style={{ minWidth: 320 }}
+                    >
+                      {exploreOptionListings.map((listing) => {
+                        const result = exploreOptionsByListing[listing.id];
+                        return (
+                          <option key={listing.id} value={listing.id}>
+                            {listing.title} · {result ? new Date(result.createdAt).toLocaleString() : "No analysis"}
+                          </option>
+                        );
+                      })}
+                    </UiSelect>
+                  ) : null}
+                  <Button variant="outline" onClick={() => setListingsPathView("cards")}>
+                    Back to Listings
+                  </Button>
+                </div>
+              </div>
+
+              {activeExploreListing && activeExploreResult ? (
+                <>
+                  <Card>
+                    <CardContent style={{ padding: 16, display: "grid", gap: 10 }}>
+                      <div style={{ fontWeight: 700 }}>{activeExploreListing.title}</div>
+                      <div style={{ color: "#334155", fontSize: 13 }}>
+                        {[activeExploreListing.addressLine1, activeExploreListing.city, activeExploreListing.state, activeExploreListing.postalCode]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <Badge>{activeExploreResult.analysis.finalVerdict}</Badge>
+                      </div>
+                      <div style={{ color: "#334155", fontSize: 13 }}>{activeExploreResult.analysis.propertySnapshot}</div>
+                      <div style={{ color: "#334155", fontSize: 13 }}>{activeExploreResult.analysis.developerSummary}</div>
+                      {activeExploreResult.analysis.redFlags.length ? (
+                        <div style={{ color: "#7f1d1d", fontSize: 12 }}>
+                          <strong>Red flags:</strong> {activeExploreResult.analysis.redFlags.join(" • ")}
+                        </div>
+                      ) : null}
+                    </CardContent>
+                  </Card>
+
+                  <div style={{ display: "grid", gap: 12 }}>
+                    {activeExploreResult.analysis.scenarios.map((scenario) => (
+                      <Card key={`${activeExploreListing.id}_${scenario.id}`}>
+                        <CardContent style={{ padding: 16, display: "grid", gap: 10 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                            <div>
+                              <div style={{ fontWeight: 700 }}>{scenario.name}</div>
+                              <div style={{ color: "#475569", fontSize: 12 }}>
+                                {scenario.scopeLevel} · Entitlement {scenario.entitlementDifficulty} · Financeability {scenario.financeability}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ color: "#334155", fontSize: 13 }}>{scenario.whyItFits}</div>
+
+                          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
+                            <MetricBox label="Timeline" value={scenario.timeline} />
+                            <MetricBox label="Margin" value={scenario.marginView} />
+                            <MetricBox label="Hard Cost / SF" value={scenario.hardCostPerSfUsd} />
+                            <MetricBox label="Total Cost Range" value={`${scenario.totalProjectCostLowUsd} - ${scenario.totalProjectCostHighUsd}`} />
+                          </div>
+
+                          {scenario.whatMustBeTrue.length ? (
+                            <div style={{ color: "#334155", fontSize: 12 }}>
+                              <strong>What must be true:</strong> {scenario.whatMustBeTrue.join(" • ")}
+                            </div>
+                          ) : null}
+                          {scenario.buildOutScope.length ? (
+                            <div style={{ color: "#334155", fontSize: 12 }}>
+                              <strong>Build-out scope:</strong> {scenario.buildOutScope.join(" • ")}
+                            </div>
+                          ) : null}
+                          {scenario.incentives.length ? (
+                            <div style={{ color: "#334155", fontSize: 12 }}>
+                              <strong>Incentives:</strong> {scenario.incentives.join(" • ")}
+                            </div>
+                          ) : null}
+                          {scenario.killPoints.length ? (
+                            <div style={{ color: "#7f1d1d", fontSize: 12 }}>
+                              <strong>Kill points:</strong> {scenario.killPoints.join(" • ")}
+                            </div>
+                          ) : null}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div style={{ color: "#64748b", fontSize: 13 }}>
+                  No options yet. Go to <strong>Listings</strong> and click <strong>Explore Options</strong> on a listing card.
+                </div>
+              )}
+
+              {exploreOptionsError ? <div style={{ color: "#b91c1c", fontSize: 12 }}>{exploreOptionsError}</div> : null}
+            </section>
+          ) : listings.length === 0 ? (
             <section style={{ minHeight: "calc(100vh - 28px)", display: "grid", placeItems: "center" }}>
               <button className="btn" onClick={() => setAddMode("chooser")}>
                 Add Listing
@@ -812,249 +943,69 @@ export default function HomePage() {
                 <Button variant="outline" onClick={() => setAddMode("chooser")}>Add Listing</Button>
               </section>
               <section className="card" style={{ padding: 16 }}>
-              <div style={{ display: "grid", gap: 16 }}>
-                {listings.map((listing) => {
-                  const primarySpace = listing.spaces[0];
-                  const sizeValue = primarySpace?.sizeSf ?? listing.squareFootage;
-                  const useValue = primarySpace?.spaceUsePrimary ?? listing.propertyClass ?? "Retail";
-                  const listingTypeLabel =
-                    listing.listingType === "FOR_LEASE"
-                      ? "For Lease"
-                      : listing.listingType === "FOR_SALE"
-                        ? "For Sale"
-                        : listing.listingType === "BOTH"
-                          ? "For Lease / Sale"
-                          : "Listing";
-                  const locationLine = [listing.city, listing.state].filter(Boolean).join(", ");
+                <div style={{ display: "grid", gap: 10 }}>
+                  {listings.map((listing) => {
+                    const primarySpace = listing.spaces[0];
+                    const buildingType = primarySpace?.spaceUsePrimary ?? listing.propertyClass ?? "Retail";
+                    const workbookCount = workbooks.filter((workbook) => workbook.listingId === listing.id).length;
+                    const proposalCount = exploreOptionsByListing[listing.id]?.analysis.scenarios.length ?? 0;
+                    const outreachCount = outreachTargets.filter((target) => target.listingId === listing.id).length;
+                    const addressPath = encodeURIComponent(listing.addressLine1 || listing.title || listing.id);
 
-                  return (
-                    <Card
-                      key={listing.id}
-                      className="overflow-hidden"
-                    >
-                      <div
-                        style={{
-                          height: 220,
-                          background: listing.heroImageUrl
-                            ? `linear-gradient(rgba(15,23,42,0.25), rgba(15,23,42,0.25)), url(${listing.heroImageUrl}) center/cover no-repeat`
-                            : "linear-gradient(135deg, #0a2540 0%, #1d4ed8 65%, #93c5fd 100%)",
-                        }}
-                      />
-
-                      <CardContent style={{ display: "grid", gap: 14, padding: 18 }}>
-                        <header>
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                            <Badge>{listingTypeLabel}</Badge>
-                            {primarySpace?.availableNow ? <Badge variant="success">Available Now</Badge> : null}
-                          </div>
-                          <MetricEditor
-                            label="Address"
-                            value={listing.addressLine1}
-                            onChange={(next) =>
-                              updateListing(listing.id, (current) => ({ ...current, addressLine1: next, title: next || current.title }))
-                            }
-                            placeholder="24 Jolma Road"
-                          />
-                          <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-                            <MetricEditor
-                              label="Location"
-                              value={locationLine}
-                              onChange={(next) => {
-                                const [city = "", state = ""] = next.split(",").map((part) => part.trim());
-                                updateListing(listing.id, (current) => ({ ...current, city, state }));
-                              }}
-                              placeholder="Worcester, MA"
-                            />
-                            <MetricEditor
-                              label="Location description"
-                              value={listing.locationDescription ?? ""}
-                              onChange={(next) => updateListing(listing.id, (current) => ({ ...current, locationDescription: next }))}
-                              placeholder="Immediate Access to I-90 & Route 12"
-                            />
-                          </div>
-                        </header>
-
-                        <section style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
-                          <MetricEditor
-                            label="Total Size"
-                            value={sizeValue != null ? `${sizeValue}` : ""}
-                            onChange={(next) => {
-                              const parsed = toNumber(next.replace(/[^\d.]/g, ""));
-                              updatePrimarySpace(listing.id, { sizeSf: parsed });
-                              updateListing(listing.id, (current) => ({ ...current, squareFootage: parsed }));
+                    return (
+                      <Link
+                        key={listing.id}
+                        href={`/listings/${addressPath}`}
+                        style={{ color: "inherit", textDecoration: "none" }}
+                      >
+                        <Card className="overflow-hidden" style={{ cursor: "pointer" }}>
+                          <CardContent
+                            style={{
+                              padding: 14,
+                              display: "grid",
+                              gap: 12,
+                              gridTemplateColumns: "minmax(220px, 1.8fr) repeat(5, minmax(100px, 1fr))",
+                              alignItems: "center",
                             }}
-                            placeholder="45300"
-                          />
-                          <MetricEditor
-                            label="Lot Size (AC)"
-                            value={listing.lotSizeAcres != null ? String(listing.lotSizeAcres) : ""}
-                            onChange={(next) => {
-                              const parsed = toNumber(next.replace(/[^\d.]/g, ""));
-                              updateListing(listing.id, (current) => ({ ...current, lotSizeAcres: parsed }));
-                            }}
-                            placeholder="2.87"
-                          />
-                          <MetricSelect
-                            label="Property Type"
-                            value={useValue}
-                            options={["Retail", "Office", "Industrial", "Restaurant / Hospitality", "Mixed-use", "Medical", "Other"]}
-                            onChange={(next) => {
-                              updatePrimarySpace(listing.id, { spaceUsePrimary: next });
-                              updateListing(listing.id, (current) => ({ ...current, propertyClass: next }));
-                            }}
-                          />
-                        </section>
-
-                        <section style={{ display: "grid", gap: 8 }}>
-                          <div style={sectionLabelStyle}>Property Highlights</div>
-                          <div style={{ display: "grid", gap: 8 }}>
-                            {listing.features.map((feature, idx) => (
-                              <div key={`${listing.id}_feature_edit_${idx}`} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
-                                <Input
-                                  value={feature.featureValueText ?? feature.sourceText ?? ""}
-                                  onChange={(event) => {
-                                    const next = event.target.value;
-                                    updateListing(listing.id, (current) => ({
-                                      ...current,
-                                      features: current.features.map((item, fIdx) =>
-                                        fIdx === idx ? { ...item, featureValueText: next, sourceText: next } : item,
-                                      ),
-                                    }));
-                                  }}
-                                />
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  onClick={() =>
-                                    updateListing(listing.id, (current) => ({
-                                      ...current,
-                                      features: current.features.filter((_, fIdx) => fIdx !== idx),
-                                    }))
-                                  }
-                                >
-                                  Remove
-                                </Button>
-                              </div>
-                            ))}
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() =>
-                                updateListing(listing.id, (current) => ({
-                                  ...current,
-                                  features: [...current.features, { featureValueText: "", sourceText: "" }],
-                                }))
-                              }
-                            >
-                              + Add Highlight
-                            </Button>
-                          </div>
-                        </section>
-
-                        <section style={{ display: "grid", gap: 8 }}>
-                          <div style={sectionLabelStyle}>Disclosures</div>
-                          <div style={{ display: "grid", gap: 8 }}>
-                            {listing.disclosures.map((disclosure, idx) => (
-                              <div key={`${listing.id}_disclosure_edit_${idx}`} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
-                                <Input
-                                  value={disclosure.text}
-                                  onChange={(event) => {
-                                    const next = event.target.value;
-                                    updateListing(listing.id, (current) => ({
-                                      ...current,
-                                      disclosures: current.disclosures.map((item, dIdx) =>
-                                        dIdx === idx ? { ...item, text: next, sourceText: next } : item,
-                                      ),
-                                    }));
-                                  }}
-                                />
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  onClick={() =>
-                                    updateListing(listing.id, (current) => ({
-                                      ...current,
-                                      disclosures: current.disclosures.filter((_, dIdx) => dIdx !== idx),
-                                      constraints: current.disclosures.filter((_, dIdx) => dIdx !== idx).map((x) => x.text),
-                                    }))
-                                  }
-                                >
-                                  Remove
-                                </Button>
-                              </div>
-                            ))}
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() =>
-                                updateListing(listing.id, (current) => ({
-                                  ...current,
-                                  disclosures: [...current.disclosures, { text: "", source: "PARSED", isMaterial: true }],
-                                }))
-                              }
-                            >
-                              + Add Disclosure
-                            </Button>
-                          </div>
-                        </section>
-
-                        <section style={{ display: "grid", gap: 8 }}>
-                          <div style={sectionLabelStyle}>Listing Summary</div>
-                          <Textarea
-                            rows={4}
-                            value={listing.listingSummary ?? ""}
-                            onChange={(event) => updateListing(listing.id, (current) => ({ ...current, listingSummary: event.target.value }))}
-                          />
-                        </section>
-
-                        <section style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
-                          <label style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 10, background: "#fcfdff", display: "grid", gap: 6 }}>
-                            <span style={{ color: "#64748b", fontSize: 12, fontWeight: 600 }}>
-                              What are you willing to offer the right tenant?
-                            </span>
-                            <Textarea
-                              rows={3}
-                              value={listing.ownerProvisions ?? ""}
-                              onChange={(event) =>
-                                updateListing(listing.id, (current) => ({ ...current, ownerProvisions: event.target.value }))
-                              }
-                              placeholder="Free rent, TI allowance, landlord buildout, rent ramp, flexible options"
-                            />
-                          </label>
-                          <MetricEditor
-                            label="Lease Term Length (Years)"
-                            value={listing.leaseTermYears != null ? String(listing.leaseTermYears) : ""}
-                            onChange={(next) =>
-                              updateListing(listing.id, (current) => ({
-                                ...current,
-                                leaseTermYears: toNumber(next.replace(/[^\d.]/g, "")),
-                              }))
-                            }
-                            placeholder="5"
-                          />
-                        </section>
-
-                        <section style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                          <Button
-                            variant="secondary"
-                            onClick={() => generateExploreOptionsForListing(listing)}
-                            disabled={exploreOptionsLoadingListingId === listing.id}
                           >
-                            {exploreOptionsLoadingListingId === listing.id ? "Exploring..." : "Explore Options"}
-                          </Button>
-                          <Button
-                            onClick={() => createWorkbookForListing(listing)}
-                            disabled={creatingWorkbookListingId === listing.id}
-                          >
-                            {creatingWorkbookListingId === listing.id ? "Creating Workbook..." : "Create Workbook"}
-                          </Button>
-                        </section>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            </section>
+                            <div style={{ minWidth: 0 }}>
+                              <div
+                                style={{
+                                  fontWeight: 700,
+                                  fontSize: 15,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {listing.addressLine1 || listing.title || "Untitled listing"}
+                              </div>
+                              <div
+                                style={{
+                                  color: "#64748b",
+                                  fontSize: 12,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {[listing.city, listing.state, listing.postalCode].filter(Boolean).join(", ")}
+                              </div>
+                            </div>
+
+                            <ListingMeta label="Building Type" value={buildingType} />
+                            <ListingMeta label="Last Edited" value={formatLastEdited(listing)} />
+                            <ListingMeta label="Workbooks" value={String(workbookCount)} />
+                            <ListingMeta label="Proposals" value={String(proposalCount)} />
+                            <ListingMeta label="Outreach" value={String(outreachCount)} />
+                          </CardContent>
+                        </Card>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </section>
+
             {workbookError ? <div style={{ color: "#b91c1c", fontSize: 12, marginTop: 10 }}>{workbookError}</div> : null}
             {exploreOptionsError ? <div style={{ color: "#b91c1c", fontSize: 12, marginTop: 10 }}>{exploreOptionsError}</div> : null}
             {listingInfoMessage ? <div style={{ color: "#1d4ed8", fontSize: 12, marginTop: 10 }}>{listingInfoMessage}</div> : null}
@@ -1105,111 +1056,7 @@ export default function HomePage() {
           </section>
         ) : null}
         {primaryTab === "proposals" ? (
-          <section className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <strong>Explore Options</strong>
-              {exploreOptionListings.length ? (
-                <UiSelect
-                  value={activeExploreListing?.id ?? ""}
-                  onChange={(event) => setActiveExploreListingId(event.target.value)}
-                  style={{ minWidth: 320 }}
-                >
-                  {exploreOptionListings.map((listing) => {
-                    const result = exploreOptionsByListing[listing.id];
-                    return (
-                      <option key={listing.id} value={listing.id}>
-                        {listing.title} · {result ? new Date(result.createdAt).toLocaleString() : "No analysis"}
-                      </option>
-                    );
-                  })}
-                </UiSelect>
-              ) : null}
-            </div>
-
-            {activeExploreListing && activeExploreResult ? (
-              <>
-                <Card>
-                  <CardContent style={{ padding: 16, display: "grid", gap: 10 }}>
-                    <div style={{ fontWeight: 700 }}>{activeExploreListing.title}</div>
-                    <div style={{ color: "#334155", fontSize: 13 }}>
-                      {[activeExploreListing.addressLine1, activeExploreListing.city, activeExploreListing.state, activeExploreListing.postalCode]
-                        .filter(Boolean)
-                        .join(", ")}
-                    </div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <Badge>{activeExploreResult.analysis.finalVerdict}</Badge>
-                    </div>
-                    <div style={{ color: "#334155", fontSize: 13 }}>{activeExploreResult.analysis.propertySnapshot}</div>
-                    <div style={{ color: "#334155", fontSize: 13 }}>{activeExploreResult.analysis.developerSummary}</div>
-                    {activeExploreResult.analysis.redFlags.length ? (
-                      <div style={{ color: "#7f1d1d", fontSize: 12 }}>
-                        <strong>Red flags:</strong> {activeExploreResult.analysis.redFlags.join(" • ")}
-                      </div>
-                    ) : null}
-                  </CardContent>
-                </Card>
-
-                <div style={{ display: "grid", gap: 12 }}>
-                  {activeExploreResult.analysis.scenarios.map((scenario) => (
-                    <Card key={`${activeExploreListing.id}_${scenario.id}`}>
-                      <CardContent style={{ padding: 16, display: "grid", gap: 10 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                          <div>
-                            <div style={{ fontWeight: 700 }}>{scenario.name}</div>
-                            <div style={{ color: "#475569", fontSize: 12 }}>
-                              {scenario.scopeLevel} · Entitlement {scenario.entitlementDifficulty} · Financeability {scenario.financeability}
-                            </div>
-                          </div>
-                          <Button
-                            variant="secondary"
-                            onClick={() => stubDraftProposal(activeExploreListing.title, scenario.name)}
-                          >
-                            Draft Proposal
-                          </Button>
-                        </div>
-
-                        <div style={{ color: "#334155", fontSize: 13 }}>{scenario.whyItFits}</div>
-
-                        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
-                          <MetricBox label="Timeline" value={scenario.timeline} />
-                          <MetricBox label="Margin" value={scenario.marginView} />
-                          <MetricBox label="Hard Cost / SF" value={scenario.hardCostPerSfUsd} />
-                          <MetricBox label="Total Cost Range" value={`${scenario.totalProjectCostLowUsd} - ${scenario.totalProjectCostHighUsd}`} />
-                        </div>
-
-                        {scenario.whatMustBeTrue.length ? (
-                          <div style={{ color: "#334155", fontSize: 12 }}>
-                            <strong>What must be true:</strong> {scenario.whatMustBeTrue.join(" • ")}
-                          </div>
-                        ) : null}
-                        {scenario.buildOutScope.length ? (
-                          <div style={{ color: "#334155", fontSize: 12 }}>
-                            <strong>Build-out scope:</strong> {scenario.buildOutScope.join(" • ")}
-                          </div>
-                        ) : null}
-                        {scenario.incentives.length ? (
-                          <div style={{ color: "#334155", fontSize: 12 }}>
-                            <strong>Incentives:</strong> {scenario.incentives.join(" • ")}
-                          </div>
-                        ) : null}
-                        {scenario.killPoints.length ? (
-                          <div style={{ color: "#7f1d1d", fontSize: 12 }}>
-                            <strong>Kill points:</strong> {scenario.killPoints.join(" • ")}
-                          </div>
-                        ) : null}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div style={{ color: "#64748b", fontSize: 13 }}>
-                No explore options yet. Go to Listings and click <strong>Explore Options</strong> on a listing card.
-              </div>
-            )}
-
-            {exploreOptionsError ? <div style={{ color: "#b91c1c", fontSize: 12 }}>{exploreOptionsError}</div> : null}
-          </section>
+          <section className="card" style={{ padding: 16, minHeight: 180 }} />
         ) : null}
         {primaryTab === "outreach" ? (
           <section className="card" style={{ padding: 16, display: "grid", gap: 14 }}>
@@ -2412,6 +2259,22 @@ function MetricBox({ label, value }: { label: string; value: string }) {
       <div style={{ fontWeight: 700, fontSize: 15, lineHeight: 1.25 }}>{value}</div>
     </div>
   );
+}
+
+function ListingMeta({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ color: "#64748b", fontSize: 11, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
+      <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{value || "—"}</div>
+    </div>
+  );
+}
+
+function formatLastEdited(listing: ListingRecord): string {
+  const raw = listing.lastUpdatedAtSource ?? listing.dateOnMarket;
+  if (!raw) return "—";
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
 }
 
 function MetricEditor({
