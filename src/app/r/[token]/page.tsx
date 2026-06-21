@@ -5,7 +5,7 @@ import { LiteOpenedBeacon } from "@/components/lite/lite-opened-beacon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { canDownloadLiteLink, getLiteLinkWithWorkbookByToken } from "@/lib/lite/service";
+import { canDownloadLiteLink, confirmLiteLinkPayment, getLiteLinkWithWorkbookByToken } from "@/lib/lite/service";
 
 function formatCurrency(amountCents: number, currency: string): string {
   return new Intl.NumberFormat("en-US", {
@@ -20,14 +20,18 @@ export default async function LitePublicLinkPage({
   searchParams,
 }: {
   params: Promise<{ token: string }>;
-  searchParams: Promise<{ checkout?: string }>;
+  searchParams: Promise<{ checkout?: string; session_id?: string }>;
 }) {
   const { token } = await params;
   const resolvedSearchParams = await searchParams;
-  const link = await getLiteLinkWithWorkbookByToken(token);
+  let link = await getLiteLinkWithWorkbookByToken(token);
 
   if (!link) {
     notFound();
+  }
+
+  if (resolvedSearchParams.checkout === "success") {
+    link = (await confirmLiteLinkPayment(token, resolvedSearchParams.session_id)) ?? link;
   }
 
   const previewRows = link.workbook.workbookRowsJson.slice(0, link.workbook.previewRowCount);

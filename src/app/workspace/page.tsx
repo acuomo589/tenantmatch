@@ -10,6 +10,8 @@ import { listLiteLinkItems } from "@/lib/lite/service";
 import { resolveLiteTenantId } from "@/lib/lite/runtime";
 import type { LiteLinkListItem } from "@/lib/lite/types";
 
+export const dynamic = "force-dynamic";
+
 function formatDateTime(value: string | null): string {
   if (!value) return "—";
 

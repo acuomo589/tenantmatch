@@ -21,7 +21,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
 
   try {
     const stripe = getStripeClient();
-    const successUrl = `${buildLiteLinkUrl(token, request)}?checkout=success`;
+    const successUrl = `${buildLiteLinkUrl(token, request)}?checkout=success&session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${buildLiteLinkUrl(token, request)}?checkout=canceled`;
 
     const session = await stripe.checkout.sessions.create({
