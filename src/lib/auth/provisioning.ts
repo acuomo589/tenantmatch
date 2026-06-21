@@ -63,13 +63,6 @@ export async function ensureTenantProvisionedForUser(args: {
       },
     });
 
-    await tx.project.create({
-      data: {
-        tenantId: tenant.id,
-        name: "Primary Project",
-      },
-    });
-
     const freePlan = await tx.plan.findUnique({ where: { code: PlanCode.FREE } });
     if (!freePlan) {
       throw new Error("Free plan not found during tenant provisioning.");

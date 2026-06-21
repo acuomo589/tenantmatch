@@ -1,259 +1,460 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties } from "react";
-import Link from "next/link";
-import { useParams } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
+import { EmptyState } from "@/components/app/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ExploreOptionsPanel } from "@/components/listings/explore-options-panel";
+import { ListingPageHeader } from "@/components/listings/listing-page-header";
+import { ListingSectionTabs } from "@/components/listings/listing-section-tabs";
+import { ListingStats } from "@/components/listings/listing-stats";
+import { OutreachPanel } from "@/components/listings/outreach-panel";
+import { OverviewPanel } from "@/components/listings/overview-panel";
+import { WorkbookPanel } from "@/components/listings/workbook-panel";
+import { WorkspaceShell } from "@/components/workspace/workspace-shell";
+import {
+  exportWorkbookCsv,
+  formatLastEdited,
+  getListingDisplayTitle,
+  LISTING_TITLE_MAX_LENGTH,
+  useWorkspaceData,
+  type ListingRecord,
+} from "@/lib/workspace-client";
 
-type ListingRecord = {
-  id: string;
-  title: string;
-  addressLine1: string;
-  city: string;
-  state: string;
-  postalCode: string;
-  squareFootage?: number;
-  lotSizeAcres?: number;
-  propertyClass?: string;
-  locationDescription?: string;
-  listingSummary?: string;
-  ownerProvisions?: string;
-  leaseTermYears?: number;
-  dateOnMarket?: string;
-  lastUpdatedAtSource?: string;
-  spaces: Array<{
-    sizeSf?: number;
-    spaceUsePrimary?: string;
-  }>;
-  disclosures: Array<{ text: string }>;
-  features: Array<{ featureValueText?: string; sourceText?: string }>;
-};
-
-type WorkspaceState = {
-  listings: ListingRecord[];
-  workbooks: Array<{ listingId: string }>;
-  outreachTargets: Array<{ listingId: string }>;
-  exploreOptionsByListing?: Record<string, { analysis?: { scenarios?: Array<unknown> } }>;
-};
-
-const LOCAL_PERSISTENCE_KEY = "timpani:workspace:v1";
+type ListingSection = "overview" | "explore-options" | "workbooks" | "proposals" | "outreach";
 
 export default function ListingDetailPage() {
+  return (
+    <Suspense
+      fallback={
+        <WorkspaceShell>
+          <section className="rounded-[2rem] border bg-card px-6 py-10 shadow-sm">Loading listing...</section>
+        </WorkspaceShell>
+      }
+    >
+      <ListingDetailPageContent />
+    </Suspense>
+  );
+}
+
+function ListingDetailPageContent() {
   const params = useParams<{ address: string }>();
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const decodedAddress = decodeURIComponent(params?.address ?? "");
+  const requestedSection = searchParams.get("section");
+  const activeSection: ListingSection =
+    requestedSection === "explore-options" ||
+    requestedSection === "strategy" ||
+    requestedSection === "workbooks" ||
+    requestedSection === "proposals" ||
+    requestedSection === "outreach" ||
+    requestedSection === "overview"
+      ? requestedSection === "strategy"
+        ? "explore-options"
+        : requestedSection
+      : "overview";
 
-  const [state, setState] = useState<WorkspaceState | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [infoMessage, setInfoMessage] = useState<string | null>(null);
-  const [creatingWorkbook, setCreatingWorkbook] = useState(false);
-  const [exploringOptions, setExploringOptions] = useState(false);
+  const {
+    listings,
+    workbooks,
+    outreachTargets,
+    exploreOptionsByListing,
+    listingResearchByListing,
+    activeWorkbookId,
+    setActiveWorkbookId,
+    activeOutreachTargetId,
+    setActiveOutreachTargetId,
+    creatingWorkbookListingId,
+    listingResearchLoadingListingId,
+    exploreOptionsLoadingListingId,
+    workbookError,
+    listingResearchError,
+    exploreOptionsError,
+    outreachError,
+    listingInfoMessage,
+    isHydrated,
+    updateListing,
+    createWorkbookForListing,
+    generateExploreOptionsForListing,
+    openOutreachForRow,
+    updateOutreachTarget,
+    generateOutreachEmail,
+    sendOutreachEmail,
+    loadMoreOutreachContacts,
+    deleteListing,
+  } = useWorkspaceData();
 
-  useEffect(() => {
-    let mounted = true;
-
-    const readLocal = (): WorkspaceState | null => {
-      if (typeof window === "undefined") return null;
-      try {
-        const raw = window.localStorage.getItem(LOCAL_PERSISTENCE_KEY);
-        return raw ? (JSON.parse(raw) as WorkspaceState) : null;
-      } catch {
-        return null;
-      }
-    };
-
-    void (async () => {
-      try {
-        const response = await fetch("/api/workspace/state", { method: "GET" });
-        const payload = response.ok ? ((await response.json()) as { state?: WorkspaceState | null }) : null;
-        if (mounted) setState(payload?.state ?? readLocal());
-      } catch {
-        if (mounted) setState(readLocal());
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  const [activeExploreTab, setActiveExploreTab] = useState("summary");
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
 
   const listing = useMemo(() => {
-    if (!state?.listings?.length) return null;
+    if (!listings.length) return null;
+
     return (
-      state.listings.find((x) => x.addressLine1 === decodedAddress) ??
-      state.listings.find((x) => x.addressLine1.toLowerCase() === decodedAddress.toLowerCase()) ??
+      listings.find((item) => item.addressLine1 === decodedAddress) ??
+      listings.find((item) => item.addressLine1.toLowerCase() === decodedAddress.toLowerCase()) ??
       null
     );
-  }, [state, decodedAddress]);
+  }, [decodedAddress, listings]);
 
-  const createWorkbook = async () => {
-    if (!listing) return;
-    setCreatingWorkbook(true);
-    setError(null);
-    setInfoMessage(null);
+  const listingWorkbooks = useMemo(
+    () => (listing ? workbooks.filter((workbook) => workbook.listingId === listing.id) : []),
+    [listing, workbooks],
+  );
 
-    try {
-      const response = await fetch("/api/workbooks/from-listing", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ listing }),
-      });
+  const activeWorkbook = useMemo(
+    () => listingWorkbooks.find((workbook) => workbook.id === activeWorkbookId) ?? listingWorkbooks[0] ?? null,
+    [listingWorkbooks, activeWorkbookId],
+  );
 
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Could not create workbook.");
+  const listingOutreachTargets = useMemo(
+    () => (listing ? outreachTargets.filter((target) => target.listingId === listing.id) : []),
+    [listing, outreachTargets],
+  );
+
+  const activeOutreachTarget = useMemo(
+    () => listingOutreachTargets.find((target) => target.id === activeOutreachTargetId) ?? listingOutreachTargets[0] ?? null,
+    [listingOutreachTargets, activeOutreachTargetId],
+  );
+
+  const selectedOutreachContact = activeOutreachTarget
+    ? activeOutreachTarget.contacts.find((contact) => contact.id === activeOutreachTarget.selectedContactId) ??
+      activeOutreachTarget.contacts[0] ??
+      null
+    : null;
+
+  useEffect(() => {
+    if (!activeWorkbook || activeWorkbook.id === activeWorkbookId) return;
+    setActiveWorkbookId(activeWorkbook.id);
+  }, [activeWorkbook, activeWorkbookId, setActiveWorkbookId]);
+
+  useEffect(() => {
+    if (!activeOutreachTarget || activeOutreachTarget.id === activeOutreachTargetId) return;
+    setActiveOutreachTargetId(activeOutreachTarget.id);
+  }, [activeOutreachTarget, activeOutreachTargetId, setActiveOutreachTargetId]);
+
+  useEffect(() => {
+    const scenarios = listing ? exploreOptionsByListing[listing.id]?.analysis.scenarios ?? [] : [];
+    if (!scenarios.length) {
+      setActiveExploreTab("summary");
+      return;
+    }
+    if (activeExploreTab === "summary") return;
+    if (!scenarios.some((scenario) => scenario.id === activeExploreTab)) {
+      setActiveExploreTab("summary");
+    }
+  }, [activeExploreTab, exploreOptionsByListing, listing]);
+
+  useEffect(() => {
+    if (!listing || isEditingTitle) return;
+    setTitleDraft(getListingDisplayTitle(listing));
+  }, [isEditingTitle, listing]);
+
+  const updateSectionInUrl = useCallback(
+    (section: ListingSection) => {
+      const nextParams = new URLSearchParams(searchParams.toString());
+      if (section === "overview") {
+        nextParams.delete("section");
+      } else {
+        nextParams.set("section", section);
       }
 
-      setInfoMessage("Workbook created. Return to Workbooks to view it.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create workbook.");
-    } finally {
-      setCreatingWorkbook(false);
-    }
-  };
+      const query = nextParams.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname);
+    },
+    [pathname, router, searchParams],
+  );
 
-  const exploreOptions = async () => {
+  const handleCreateWorkbook = useCallback(async () => {
     if (!listing) return;
-    setExploringOptions(true);
-    setError(null);
-    setInfoMessage(null);
 
-    try {
-      const response = await fetch("/api/listings/explore-options", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ listing }),
-      });
+    const workbook = await createWorkbookForListing(listing);
+    if (!workbook) return;
+    setActiveWorkbookId(workbook.id);
+    updateSectionInUrl("workbooks");
+  }, [createWorkbookForListing, listing, setActiveWorkbookId, updateSectionInUrl]);
 
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Could not explore options.");
-      }
+  const handleExploreOptions = useCallback(async () => {
+    if (!listing) return;
 
-      setInfoMessage("Explore options generated. Return to Listings → Options to review.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not explore options.");
-    } finally {
-      setExploringOptions(false);
-    }
-  };
+    updateSectionInUrl("explore-options");
+    const created = await generateExploreOptionsForListing(listing);
+    if (!created) return;
+    setActiveExploreTab("summary");
+  }, [generateExploreOptionsForListing, listing, updateSectionInUrl]);
 
-  if (!state) {
-    return <main style={{ padding: 16 }}>Loading listing…</main>;
+  const handleSaveOverview = useCallback(
+    ({ summary, highlights, notes }: { summary: string; highlights: string[]; notes: string[] }) => {
+      if (!listing) return;
+
+      const listingLabel = getListingDisplayTitle(listing);
+      updateListing(
+        listing.id,
+        (current) => ({
+          ...current,
+          listingSummary: summary || undefined,
+          features: mergeFeatureRecords(current.features, highlights),
+          disclosures: mergeDisclosureRecords(current.disclosures, notes),
+          constraints: notes,
+        }),
+        `Overview updated for ${listingLabel}.`,
+      );
+    },
+    [listing, updateListing],
+  );
+
+  const handleSaveTitle = useCallback(() => {
+    if (!listing) return;
+
+    const trimmedTitle = titleDraft.trim().slice(0, LISTING_TITLE_MAX_LENGTH);
+    const addressTitle = listing.addressLine1?.trim() || "";
+    const nextCustomTitle = trimmedTitle && trimmedTitle !== addressTitle ? trimmedTitle : undefined;
+
+    updateListing(
+      listing.id,
+      (current) => ({
+        ...current,
+        customTitle: nextCustomTitle,
+      }),
+      "Title updated.",
+    );
+    setIsEditingTitle(false);
+  }, [listing, titleDraft, updateListing]);
+
+  const handleDelete = useCallback(() => {
+    if (!listing) return;
+    const shouldDelete = window.confirm(`Delete ${getListingDisplayTitle(listing)}?`);
+    if (!shouldDelete) return;
+    deleteListing(listing.id);
+    router.push("/workspace");
+  }, [deleteListing, listing, router]);
+
+  if (!isHydrated) {
+    return (
+      <WorkspaceShell>
+        <section className="rounded-[2rem] border bg-card px-6 py-10 shadow-sm">Loading listing...</section>
+      </WorkspaceShell>
+    );
   }
 
   if (!listing) {
     return (
-      <main style={{ padding: 16, display: "grid", gap: 12 }}>
-        <strong>Listing not found</strong>
-        <Link href="/workspace?tab=listings" className="btn secondary" style={{ width: "fit-content" }}>
-          Back to listings
-        </Link>
-      </main>
+      <WorkspaceShell>
+        <EmptyState
+          title="Listing not found"
+          description="This listing is no longer in the workspace or the address path has changed."
+          action={
+            <Button asChild variant="outline">
+              <a href="/workspace">Back to listings</a>
+            </Button>
+          }
+        />
+      </WorkspaceShell>
     );
   }
 
   const primarySpace = listing.spaces[0];
-  const buildingType = primarySpace?.spaceUsePrimary ?? listing.propertyClass ?? "Retail";
+  const buildingType = primarySpace?.spaceUsePrimary ?? listing.propertyClass ?? "Commercial";
   const sizeValue = primarySpace?.sizeSf ?? listing.squareFootage;
-  const workbookCount = state.workbooks.filter((x) => x.listingId === listing.id).length;
-  const proposalCount = state.exploreOptionsByListing?.[listing.id]?.analysis?.scenarios?.length ?? 0;
-  const outreachCount = state.outreachTargets.filter((x) => x.listingId === listing.id).length;
+  const workbookCount = listingWorkbooks.length;
+  const proposalCount = 0;
+  const outreachCount = listingOutreachTargets.length;
+  const listingResearchResult = listingResearchByListing[listing.id] ?? null;
+  const listingResearchLoading = listingResearchLoadingListingId === listing.id;
+  const exploreOptionsResult = exploreOptionsByListing[listing.id] ?? null;
+  const exploreOptionsLoading = exploreOptionsLoadingListingId === listing.id;
+
+  const sectionTabs = [
+    { id: "overview", label: "Overview", count: undefined },
+    { id: "explore-options", label: "Options", count: exploreOptionsResult?.analysis.scenarios.length },
+    { id: "workbooks", label: "Workbooks", count: workbookCount },
+    { id: "proposals", label: "Proposals", count: proposalCount },
+    { id: "outreach", label: "Outreach", count: outreachCount },
+  ] as const satisfies ReadonlyArray<{ id: ListingSection; label: string; count?: number }>;
+
+  const title = getListingDisplayTitle(listing);
+  const subtitle = [listing.city, [listing.state, listing.postalCode].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  const description =
+    listing.locationDescription || "No location notes yet. Add source detail or run parsing to sharpen the context.";
+  const listingModeLabel = formatListingMode(listing);
+  const meta = [
+    buildingType,
+    listingModeLabel,
+    formatLastEdited(listing) !== "—" ? `Updated ${formatLastEdited(listing)}` : "",
+    listingResearchLoading
+      ? "Research running..."
+      : listingResearchResult
+        ? `Research ready · ${listingResearchResult.analysis.confidence} confidence`
+        : "",
+    exploreOptionsLoading
+      ? "Options running..."
+      : exploreOptionsResult
+        ? `Options ready · ${exploreOptionsResult.analysis.scenarios.length} scenarios`
+        : "",
+  ].filter(Boolean);
+
+  const notices = [
+    listingInfoMessage ? { tone: "info" as const, message: listingInfoMessage } : null,
+    workbookError ? { tone: "error" as const, message: workbookError } : null,
+    listingResearchError ? { tone: "error" as const, message: listingResearchError } : null,
+    exploreOptionsError ? { tone: "error" as const, message: exploreOptionsError } : null,
+    outreachError ? { tone: "error" as const, message: outreachError } : null,
+  ].filter((notice): notice is { tone: "info" | "error"; message: string } => Boolean(notice));
 
   return (
-    <main style={{ padding: 16, display: "grid", gap: 12 }}>
-      <section style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <div>
-          <strong style={{ fontSize: 18 }}>{listing.addressLine1 || listing.title}</strong>
-          <div style={{ color: "#64748b", marginTop: 4 }}>{[listing.city, listing.state, listing.postalCode].filter(Boolean).join(", ")}</div>
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Button variant="secondary" onClick={exploreOptions} disabled={exploringOptions}>
-            {exploringOptions ? "Exploring..." : "Explore Options"}
-          </Button>
-          <Button onClick={createWorkbook} disabled={creatingWorkbook}>
-            {creatingWorkbook ? "Creating Workbook..." : "Create Workbook"}
-          </Button>
-          <Link href="/workspace?tab=listings" className="btn secondary">
-            Back
-          </Link>
-        </div>
-      </section>
+    <WorkspaceShell>
+      <div className="grid gap-6">
+        <ListingPageHeader
+          title={title}
+          subtitle={subtitle || "Address details unavailable"}
+          description={description}
+          meta={meta}
+          stats={
+            <ListingStats
+              cards={[
+                { label: "Available size", value: formatSquareFeet(sizeValue) },
+                { label: "Lot size", value: formatLotSize(listing.lotSizeAcres) },
+                { label: "Property type", value: buildingType },
+                { label: "Market score", value: listingResearchLoading ? "Running..." : formatScore(listingResearchResult?.analysis.marketScore) },
+                { label: "Listing score", value: listingResearchLoading ? "Running..." : formatScore(listingResearchResult?.analysis.listingScore) },
+              ]}
+            />
+          }
+          titleDraft={titleDraft}
+          isEditingTitle={isEditingTitle}
+          onTitleDraftChange={(value) => setTitleDraft(value.slice(0, LISTING_TITLE_MAX_LENGTH))}
+          onStartEditingTitle={() => setIsEditingTitle(true)}
+          onCancelTitleEdit={() => {
+            setTitleDraft(getListingDisplayTitle(listing));
+            setIsEditingTitle(false);
+          }}
+          onSaveTitle={handleSaveTitle}
+          onCreateWorkbook={() => void handleCreateWorkbook()}
+          onExploreOptions={() => void handleExploreOptions()}
+          onDelete={handleDelete}
+          creatingWorkbook={creatingWorkbookListingId === listing.id}
+          exploringOptions={exploreOptionsLoading}
+          notices={notices}
+        />
 
-      <section style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <Badge>{buildingType}</Badge>
-        <Badge variant="outline">Last edited: {formatDate(listing.lastUpdatedAtSource ?? listing.dateOnMarket)}</Badge>
-        <Badge variant="outline">Workbooks: {workbookCount}</Badge>
-        <Badge variant="outline">Proposals: {proposalCount}</Badge>
-        <Badge variant="outline">Outreach: {outreachCount}</Badge>
-      </section>
+        <ListingSectionTabs sections={sectionTabs} activeSection={activeSection} onSelectSection={updateSectionInUrl} />
 
-      <Card>
-        <CardContent style={{ display: "grid", gap: 12, padding: 18 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
-            <Metric label="Total Size" value={sizeValue != null ? `${sizeValue.toLocaleString()} SF` : "—"} />
-            <Metric label="Lot Size (AC)" value={listing.lotSizeAcres != null ? String(listing.lotSizeAcres) : "—"} />
-            <Metric label="Property Type" value={buildingType} />
-          </div>
+        {activeSection === "overview" ? <OverviewPanel listing={listing} onSaveOverview={handleSaveOverview} /> : null}
 
-          <div>
-            <div style={sectionLabelStyle}>Location description</div>
-            <div>{listing.locationDescription || "—"}</div>
-          </div>
+        {activeSection === "explore-options" ? (
+          <ExploreOptionsPanel
+            exploreOptionsResult={exploreOptionsResult}
+            loading={exploreOptionsLoading}
+            activeTabId={activeExploreTab}
+            onSelectTab={setActiveExploreTab}
+            onGenerate={() => void handleExploreOptions()}
+          />
+        ) : null}
 
-          <div>
-            <div style={sectionLabelStyle}>Property highlights</div>
-            <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {listing.features.length ? listing.features.map((f, idx) => <li key={idx}>{f.featureValueText ?? f.sourceText ?? "—"}</li>) : <li>—</li>}
-            </ul>
-          </div>
+        {activeSection === "workbooks" ? (
+          <WorkbookPanel
+            listingWorkbooks={listingWorkbooks}
+            activeWorkbook={activeWorkbook}
+            onSelectWorkbook={setActiveWorkbookId}
+            onExportWorkbook={exportWorkbookCsv}
+            onOpenOutreach={(row) => {
+              if (!activeWorkbook) return;
+              openOutreachForRow(activeWorkbook, row);
+              updateSectionInUrl("outreach");
+            }}
+          />
+        ) : null}
 
-          <div>
-            <div style={sectionLabelStyle}>Disclosures</div>
-            <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {listing.disclosures.length ? listing.disclosures.map((d, idx) => <li key={idx}>{d.text}</li>) : <li>—</li>}
-            </ul>
-          </div>
+        {activeSection === "proposals" ? (
+          <Card data-surface>
+            <CardContent className="grid gap-3 p-6">
+              <h2 className="text-lg font-semibold tracking-tight">Proposals</h2>
+              <p className="text-sm text-muted-foreground">
+                {exploreOptionsResult
+                  ? "Proposal framing will build from the selected option path next."
+                  : "Explore options first to generate the inputs for proposal writing."}
+              </p>
+            </CardContent>
+          </Card>
+        ) : null}
 
-          <div>
-            <div style={sectionLabelStyle}>Listing summary</div>
-            <div>{listing.listingSummary || "—"}</div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-            <Metric label="Owner Provisions" value={listing.ownerProvisions || "—"} />
-            <Metric label="Lease Term Length (Years)" value={listing.leaseTermYears != null ? String(listing.leaseTermYears) : "—"} />
-          </div>
-        </CardContent>
-      </Card>
-
-      {error ? <div style={{ color: "#b91c1c", fontSize: 12 }}>{error}</div> : null}
-      {infoMessage ? <div style={{ color: "#1d4ed8", fontSize: 12 }}>{infoMessage}</div> : null}
-    </main>
+        {activeSection === "outreach" ? (
+          <OutreachPanel
+            listing={listing}
+            listingOutreachTargets={listingOutreachTargets}
+            activeOutreachTarget={activeOutreachTarget}
+            selectedOutreachContact={selectedOutreachContact}
+            onSelectTarget={setActiveOutreachTargetId}
+            onUpdateTarget={updateOutreachTarget}
+            onGenerateEmail={(targetId) => void generateOutreachEmail(targetId)}
+            onSendEmail={(targetId) => void sendOutreachEmail(targetId)}
+            onLoadMoreContacts={(targetId) => void loadMoreOutreachContacts(targetId)}
+          />
+        ) : null}
+      </div>
+    </WorkspaceShell>
   );
 }
 
-function formatDate(value?: string): string {
-  if (!value) return "—";
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
+function formatSquareFeet(value?: number): string {
+  return value != null ? `${value.toLocaleString()} SF` : "Not provided";
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 10, background: "#fcfdff" }}>
-      <div style={{ color: "#64748b", fontSize: 12, marginBottom: 4 }}>{label}</div>
-      <div style={{ fontWeight: 600 }}>{value}</div>
-    </div>
-  );
+function formatLotSize(value?: number): string {
+  return value != null ? `${value.toLocaleString()} AC` : "Not provided";
 }
 
-const sectionLabelStyle: CSSProperties = {
-  fontSize: 12,
-  fontWeight: 700,
-  letterSpacing: "0.04em",
-  textTransform: "uppercase",
-  color: "#64748b",
-};
+function formatListingMode(listing: ListingRecord): string {
+  if (listing.listingType === "FOR_LEASE") return "For lease";
+  if (listing.listingType === "FOR_SALE") return "For sale";
+  if (listing.listingType === "BOTH") return "For lease or sale";
+  return "";
+}
+
+function formatScore(value?: number): string {
+  return typeof value === "number" ? `${value}/100` : "Not provided";
+}
+
+function mergeFeatureRecords(existing: ListingRecord["features"], items: string[]): ListingRecord["features"] {
+  const unused = [...existing];
+
+  return items.map((item) => {
+    const matchIndex = unused.findIndex((feature) => normalizeEditableItem(feature.featureValueText ?? feature.sourceText ?? "") === normalizeEditableItem(item));
+    if (matchIndex < 0) {
+      return { featureValueText: item, sourceText: item };
+    }
+
+    const [match] = unused.splice(matchIndex, 1);
+    return {
+      ...match,
+      featureValueText: item,
+      sourceText: match.sourceText ?? item,
+    };
+  });
+}
+
+function mergeDisclosureRecords(existing: ListingRecord["disclosures"], items: string[]): ListingRecord["disclosures"] {
+  const unused = [...existing];
+
+  return items.map((item) => {
+    const matchIndex = unused.findIndex((disclosure) => normalizeEditableItem(disclosure.text) === normalizeEditableItem(item));
+    if (matchIndex < 0) {
+      return { text: item, sourceText: item };
+    }
+
+    const [match] = unused.splice(matchIndex, 1);
+    return {
+      ...match,
+      text: item,
+      sourceText: match.sourceText ?? item,
+    };
+  });
+}
+
+function normalizeEditableItem(value: string): string {
+  return value.trim().toLowerCase();
+}

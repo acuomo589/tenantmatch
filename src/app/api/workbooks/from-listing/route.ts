@@ -4,6 +4,8 @@ import path from "node:path";
 import { getAiConfig } from "@/lib/ai/config";
 import { consumeEntitlement, EntitlementError } from "@/lib/billing/entitlements";
 import { requireTenantContext } from "@/lib/auth/requestContext";
+import { hasSupabaseConfig, isSupabaseConfigError } from "@/lib/auth/supabaseConfig";
+import { isMockAgenticFlowEnabled, MOCK_WORKBOOK_CSV, MOCK_WORKBOOK_ROWS } from "@/lib/testing/mock-agentic-flow";
 import { parseWorkbookCsv } from "@/lib/workbookCsv";
 
 type ListingInput = {
@@ -140,7 +142,25 @@ async function repairWorkbookCsv(args: {
 export async function POST(request: Request) {
   const requestId = `workbook_${Math.random().toString(36).slice(2, 8)}`;
   try {
-    const context = await requireTenantContext();
+    if (isMockAgenticFlowEnabled()) {
+      return NextResponse.json({
+        csv: MOCK_WORKBOOK_CSV,
+        rows: MOCK_WORKBOOK_ROWS,
+      });
+    }
+
+    let context: Awaited<ReturnType<typeof requireTenantContext>> | null = null;
+
+    if (hasSupabaseConfig()) {
+      try {
+        context = await requireTenantContext();
+      } catch (error) {
+        if (!isSupabaseConfigError(error)) {
+          throw error;
+        }
+      }
+    }
+
     const body = (await request.json()) as { listing?: ListingInput };
     const listing = body.listing;
     if (!listing?.addressLine1) {
@@ -322,20 +342,23 @@ export async function POST(request: Request) {
       );
     }
 
-    await consumeEntitlement({
-      tenantId: context.tenantId,
-      metric: "WORKBOOKS",
-      increment: 1,
-    });
-    await consumeEntitlement({
-      tenantId: context.tenantId,
-      metric: "WORKBOOK_ROWS",
-      increment: rows.length,
-    });
+    if (context) {
+      await consumeEntitlement({
+        tenantId: context.tenantId,
+        metric: "WORKBOOKS",
+        increment: 1,
+      });
+      await consumeEntitlement({
+        tenantId: context.tenantId,
+        metric: "WORKBOOK_ROWS",
+        increment: rows.length,
+      });
+    }
 
     console.info("[workbooks/from-listing] request succeeded", {
       requestId,
       rowCount: rows.length,
+      authMode: context ? "tenant" : "local",
     });
     return NextResponse.json({ csv, rows });
   } catch (error) {

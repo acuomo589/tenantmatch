@@ -1,17 +1,12 @@
-# Timpani Lean Machine Prototype
+# Timpani Lite
 
-Ultra-lean Next.js prototype focused on experience first:
+Sheet-driven paid workbook link flow for commercial real estate teams:
 
-- Empty state with centered **Add Listing** CTA
-- Stepper intake modal:
-  1. Address + radius + property type
-  2. Tenant type filters
-  3. Tenant specs / constraints
-  4. Owner incentives
-- Run base prompt -> CSV -> deterministic normalize/rerank -> grid
-- Side-pane chat refinement that mutates prompt and re-runs
-- Thread clone support
-- Provider config with mock mode fallback
+- Add `broker_name`, `email`, and `listing_address` rows to a Google Sheet
+- Click **Process new rows** in `/workspace`
+- Write the buyer-specific paywall URL back into the row's `link` column, creating that column if needed
+- Show 1 preview row before payment
+- Unlock full CSV + PDF after Stripe checkout
 
 ## Run locally
 
@@ -37,43 +32,66 @@ Open `http://localhost:3000`.
 
 ## Env notes
 
+- `APP_URL` is the optional server-only canonical URL; if unset, the app falls back to `NEXT_PUBLIC_APP_URL`.
 - `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` enable auth.
-- `DATABASE_URL` is required for tenant/workspace/billing persistence.
-- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PLUS`, and `STRIPE_PRICE_PRO` enable upgrade checkout + webhook syncing.
+- `DATABASE_URL` is still used for auth, subscriptions, and workspace state, but Timpani Lite link persistence now lives in Google Sheets.
+- `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` enable lite payment checkout + webhook syncing.
+- `NEXT_PUBLIC_APP_URL` must be a public `https://...` URL in production so generated buyer links are not written as `localhost`.
+- `LITE_LINK_PRICE_CENTS` controls the default one-time buyer price.
+- `LITE_GOOGLE_SHEET_URL` points at the Google Sheet used for both the intake queue and the archive tab.
+- `LITE_GOOGLE_SHEET_TAB_NAME` optionally chooses the intake tab; otherwise the first tab is used.
+- `LITE_GOOGLE_LINKS_TAB_NAME` controls the archive tab used for workbook backups and payment state.
+- `GOOGLE_SERVICE_ACCOUNT_EMAIL` + `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` enable server-side Google Sheets read/write access.
 - `AI_USE_MOCK=1` uses deterministic mock CSV output (default in example).
 - Set `AI_USE_MOCK=0` + `OPENAI_API_KEY` (or legacy `OPEN_API_KEY`) to call OpenAI.
-- `AI_LISTING_PARSER_MODEL` controls structured listing parse model (default `o3-mini`).
+- `TIMPANI_MOCK_AGENTIC_FLOW` must stay unset or `0` in production.
 - `AI_WORKBOOK_MODEL` controls workbook generation model (default `gpt-5.4`).
 - Set `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY` to capture agent/LLM traces in LangSmith.
 - Optional `LANGSMITH_PROJECT` controls project name in LangSmith (defaults to `timpani-proto`).
-- `AI_PROVIDER=vertex` is scaffolded but intentionally not wired in this proto.
-- `ATTOM_API_KEY` enables ATTOM Property API proxy routes.
-- Optional `ATTOM_BASE_URL` defaults to `https://api.gateway.attomdata.com`.
-- `NEXT_PUBLIC_LOCAL_PERSISTENCE=1` keeps listings/workbooks/outreach state in browser `localStorage` (set to `0` to disable).
-- `NEXT_PUBLIC_LOCAL_PERSISTENCE_MODE=server` (default) persists workspace state per tenant via `/api/workspace/state` in Postgres; set to `local` for browser-only.
+
+## Production checklist
+
+Before going live, make sure all of the following are true:
+
+- `APP_URL` or `NEXT_PUBLIC_APP_URL` is set to your public production domain, for example `https://tenantmatch.yourdomain.com`
+- `LITE_GOOGLE_SHEET_URL` points at the production spreadsheet and the service account can edit both tabs
+- `STRIPE_SECRET_KEY` is a live `sk_live_...` key
+- `STRIPE_WEBHOOK_SECRET` matches the webhook endpoint configured for `POST /api/webhooks/stripe`
+- `AI_USE_MOCK=0`
+- `TIMPANI_MOCK_AGENTIC_FLOW` is unset or `0`
+- Google Sheets service account credentials are set
+- `OPENAI_API_KEY` is set
+
+Example deploy step for non-lite schema changes:
+
+```bash
+npx prisma migrate deploy
+```
 
 ## API routes
 
-- `POST /api/run` → create/update thread run
-- `POST /api/chat` → append user message, mutate prompt, rerun
-- `GET /api/threads` → list threads
-- `GET /api/threads/:threadId` → fetch thread
-- `POST /api/threads/:threadId/clone` → clone thread
-- `GET /api/attom/property-v1/:operation` → proxy ATTOM Property V1 operations (`address`, `detail`, `basicprofile`, etc.)
-- `POST /api/listings/parse` → parse listing detail text into structured listing JSON (AI-first with fallback in UI)
-- `POST /api/workbooks/from-listing` → run `workbook-prompt.txt` against listing context and return workbook CSV + parsed rows
-- `GET /api/billing/usage` → current tenant plan + monthly usage counters
-- `POST /api/billing/checkout` → create Stripe checkout URL for PLUS/PRO upgrades
+- `POST /api/lite/sheets/process` → scan the configured Google Sheet and write new paywall links back to blank `link` cells
+- `GET /api/lite/links` → list recent lite links for the admin dashboard
+- `POST /api/lite/links/:token/opened` → mark first buyer page view
+- `POST /api/lite/links/:token/checkout` → create one-time Stripe checkout for a lite link
 - `POST /api/webhooks/stripe` → sync subscription status from Stripe events
+- `GET /r/:token` → public lite paywall/unlock page
+- `GET /r/:token/download/csv` → paid CSV download
+- `GET /r/:token/download/pdf` → paid PDF download
 
-## Customer-ready baseline added
+## Google Sheet columns
 
-- Supabase auth foundation (`/signup`, `/signin`, `/auth/callback`, middleware-guarded private routes)
-- Automatic tenant provisioning on first sign-in + tenant-aware request context
-- Tenant isolation applied to thread APIs and workspace state persistence
-- Plan entitlements enforced for listings, contacts, workbooks, and workbook rows
-- Pricing page + usage panel in workspace sidebar + Stripe checkout/webhook scaffolding
+The launch sheet can use these headers:
 
-## Schema
+- `listing_address` for the property address
+- `email` for the buyer/broker email
+- `broker_name` for the optional display name
+- `link` for the generated paywall URL
 
-`schema.prisma` has been simplified to a lean model (`Project`, `Thread`, `Run`, `Message`) aligned to this prototype direction.
+If the `link` header is missing, the processor adds it in the next column during the first run.
+
+The parser also accepts the earlier generic aliases `address`, `buyer_email`, and `buyer_name`.
+
+## Notes
+
+- In mock mode (`TIMPANI_MOCK_AGENTIC_FLOW=1`), workbook generation, sheet rows, and lite link persistence all fall back to deterministic in-memory fixtures so the flow can be tested without live external services.

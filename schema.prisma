@@ -26,6 +26,13 @@ enum SubscriptionStatus {
   INCOMPLETE
 }
 
+enum LiteLinkStatus {
+  GENERATED
+  OPENED
+  PAID
+  FAILED
+}
+
 enum UsageMetric {
   LISTINGS
   CONTACTS
@@ -33,309 +40,13 @@ enum UsageMetric {
   WORKBOOK_ROWS
 }
 
-enum RunStatus {
-  RUNNING
-  SUCCEEDED
-  FAILED
-}
-
-enum MessageRole {
-  SYSTEM
-  USER
-  ASSISTANT
-}
-
-enum ListingSource {
-  ATTOM
-  LOOPNET
-  MANUAL
-}
-
-enum ListingType {
-  FOR_LEASE
-  FOR_SALE
-  BOTH
-}
-
-enum ListingLifecycleStatus {
-  ACTIVE
-  OFF_MARKET
-}
-
-enum ListingContactRole {
-  LEASING_AGENT
-  OWNER
-  BROKER
-  OTHER
-}
-
-enum ListingTextSource {
-  UPLOAD
-  SEARCH
-  PARSED
-}
-
-model Project {
-  id        String   @id @default(uuid()) @db.Uuid
-  tenantId  String   @map("tenant_id") @db.Uuid
-  name      String
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  listings  Listing[]
-  threads   Thread[]
-
-  @@index([tenantId, updatedAt])
-  @@map("projects")
-}
-
-model Listing {
-  id                String    @id @default(uuid()) @db.Uuid
-  projectId         String    @map("project_id") @db.Uuid
-  source            ListingSource? @default(ATTOM)
-  sourceListingId   String?   @map("source_listing_id")
-  listingType       ListingType? @map("listing_type")
-  lifecycleStatus   ListingLifecycleStatus? @default(ACTIVE) @map("lifecycle_status")
-  dateOnMarket      DateTime? @map("date_on_market") @db.Date
-  lastUpdatedAtSource DateTime? @map("last_updated_at_source") @db.Date
-  parseConfidence   Decimal?  @map("parse_confidence") @db.Decimal(5, 4)
-  parseWarningsJson Json?     @map("parse_warnings_json")
-  rawSourceText     String?   @map("raw_source_text")
-  ownerProvisions   String?   @map("owner_provisions")
-  leaseTermYears    Int?      @map("lease_term_years")
-  title             String
-  addressLine1      String    @map("address_line_1")
-  addressLine2      String?   @map("address_line_2")
-  city              String
-  state             String
-  postalCode        String    @map("postal_code")
-  squareFootage     Int?      @map("square_footage")
-  noi               Decimal?  @db.Decimal(14, 2)
-  capRate           Decimal?  @map("cap_rate") @db.Decimal(7, 4)
-  pricePerSquareFoot Decimal? @map("price_per_square_foot") @db.Decimal(12, 2)
-  daysOnMarket      Int?      @map("days_on_market")
-  attomId           String?   @map("attom_id")
-  attomRawJson      Json?     @map("attom_raw_json")
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  project           Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  threads           Thread[]
-  asset             ListingAsset?
-  spaces            ListingSpace[]
-  features          ListingFeature[]
-  disclosures       ListingDisclosure[]
-  contacts          ListingContact[]
-  tenants           ListingTenant[]
-  marketSnapshot    ListingMarketSnapshot?
-
-  @@index([projectId, updatedAt])
-  @@index([attomId])
-  @@map("listings")
-}
-
-model ListingAsset {
-  id                 String   @id @default(uuid()) @db.Uuid
-  listingId          String   @unique @map("listing_id") @db.Uuid
-  assetType          String?  @map("asset_type")
-  assetSubtype       String?  @map("asset_subtype")
-  buildingSizeSf     Int?     @map("building_size_sf")
-  lotSizeAcres       Decimal? @map("lot_size_acres") @db.Decimal(10, 2)
-  yearBuilt          Int?     @map("year_built")
-  yearRenovated      Int?     @map("year_renovated")
-  constructionType   String?  @map("construction_type")
-  constructionStatus String?  @map("construction_status")
-  buildingClass      String?  @map("building_class")
-  buildingHeightStories Int?  @map("building_height_stories")
-  typicalFloorSizeSf Int?     @map("typical_floor_size_sf")
-  clearHeightFt      Decimal? @map("clear_height_ft") @db.Decimal(6, 2)
-  columnSpacingText  String?  @map("column_spacing_text")
-  floorLoadPsf       Int?     @map("floor_load_psf")
-  zoningCode         String?  @map("zoning_code")
-  zoningDescription  String?  @map("zoning_description")
-  powerAmps          Int?     @map("power_amps")
-  powerVolts         Int?     @map("power_volts")
-  powerPhase         Int?     @map("power_phase")
-  powerWire          Int?     @map("power_wire")
-  parkingJson        Json?    @map("parking_json")
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  listing            Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
-
-  @@map("listing_assets")
-}
-
-model ListingSpace {
-  id                 String   @id @default(uuid()) @db.Uuid
-  listingId          String   @map("listing_id") @db.Uuid
-  spaceLabel         String?  @map("space_label")
-  floorLabel         String?  @map("floor_label")
-  suite              String?
-  spaceUsePrimary    String?  @map("space_use_primary")
-  spaceUseTagsJson   Json?    @map("space_use_tags_json")
-  sizeSf             Int?     @map("size_sf")
-  minSizeSf          Int?     @map("min_size_sf")
-  maxSizeSf          Int?     @map("max_size_sf")
-  termText           String?  @map("term_text")
-  termMinYears       Int?     @map("term_min_years")
-  termMaxYears       Int?     @map("term_max_years")
-  rentalRatePerSfYr  Decimal? @map("rental_rate_per_sf_yr") @db.Decimal(10, 2)
-  rentalRateDisplay  String?  @map("rental_rate_display")
-  buildOut           String?  @map("build_out")
-  availableDate      DateTime? @map("available_date") @db.Date
-  availableNow       Boolean? @map("available_now")
-  spaceNotes         String?  @map("space_notes")
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  listing            Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
-
-  @@index([listingId, updatedAt])
-  @@map("listing_spaces")
-}
-
-model ListingFeature {
-  id                 String   @id @default(uuid()) @db.Uuid
-  listingId          String   @map("listing_id") @db.Uuid
-  featureKey         String?  @map("feature_key")
-  featureValueNumber Decimal? @map("feature_value_number") @db.Decimal(12, 2)
-  featureValueText   String?  @map("feature_value_text")
-  unit               String?
-  sourceText         String?  @map("source_text")
-  tagsJson           Json?    @map("tags_json")
-  confidence         Decimal? @db.Decimal(5, 4)
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  listing            Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
-
-  @@index([listingId])
-  @@map("listing_features")
-}
-
-model ListingDisclosure {
-  id          String            @id @default(uuid()) @db.Uuid
-  listingId   String            @map("listing_id") @db.Uuid
-  text        String
-  sourceText  String?           @map("source_text")
-  source      ListingTextSource?
-  isMaterial  Boolean?          @default(true) @map("is_material")
-  tagsJson    Json?             @map("tags_json")
-  confidence  Decimal?          @db.Decimal(5, 4)
-  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
-  listing     Listing           @relation(fields: [listingId], references: [id], onDelete: Cascade)
-
-  @@index([listingId])
-  @@map("listing_disclosures")
-}
-
-model ListingContact {
-  id                 String   @id @default(uuid()) @db.Uuid
-  listingId          String   @map("listing_id") @db.Uuid
-  name               String
-  role               ListingContactRole @default(OTHER)
-  company            String?
-  phone              String?
-  email              String?
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  listing            Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
-
-  @@index([listingId])
-  @@map("listing_contacts")
-}
-
-model ListingTenant {
-  id                 String   @id @default(uuid()) @db.Uuid
-  listingId          String   @map("listing_id") @db.Uuid
-  tenantName         String   @map("tenant_name")
-  industry           String?
-  floorLabel         String?  @map("floor_label")
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  listing            Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
-
-  @@index([listingId])
-  @@map("listing_tenants")
-}
-
-model ListingMarketSnapshot {
-  id                 String   @id @default(uuid()) @db.Uuid
-  listingId          String   @unique @map("listing_id") @db.Uuid
-  walkScore          Int?     @map("walk_score")
-  driveScore         Int?     @map("drive_score")
-  transitScore       Int?     @map("transit_score")
-  bikeScore          Int?     @map("bike_score")
-  demographicsJson   Json?    @map("demographics_json")
-  spendingJson       Json?    @map("spending_json")
-  amenitiesJson      Json?    @map("amenities_json")
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  listing            Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
-
-  @@map("listing_market_snapshots")
-}
-
-model Thread {
-  id               String    @id @default(uuid()) @db.Uuid
-  projectId        String    @map("project_id") @db.Uuid
-  listingId        String?   @map("listing_id") @db.Uuid
-  title            String
-  address          String
-  radiusMiles      Int       @default(30) @map("radius_miles")
-  propertyType     String?   @map("property_type")
-  tenantTypesJson  Json      @default("[]") @map("tenant_types_json")
-  tenantSpecs      String?   @map("tenant_specs")
-  ownerIncentives  String?   @map("owner_incentives")
-  basePrompt       String    @map("base_prompt")
-  currentPrompt    String    @map("current_prompt")
-  filtersJson      Json      @default("{}") @map("filters_json")
-  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  listing          Listing?  @relation(fields: [listingId], references: [id], onDelete: SetNull)
-  runs             Run[]
-  messages         Message[]
-
-  @@index([projectId, updatedAt])
-  @@index([listingId, updatedAt])
-  @@map("threads")
-}
-
-model Run {
-  id            String    @id @default(uuid()) @db.Uuid
-  threadId      String    @map("thread_id") @db.Uuid
-  provider      String
-  model         String
-  status        RunStatus @default(RUNNING)
-  promptText    String    @map("prompt_text")
-  inputJson     Json      @default("{}") @map("input_json")
-  outputCsv     String?   @map("output_csv")
-  outputRowsJson Json?    @map("output_rows_json")
-  tokenUsageJson Json?    @map("token_usage_json")
-  error         String?
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  thread        Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
-
-  @@index([threadId, createdAt])
-  @@map("runs")
-}
-
-model Message {
-  id         String      @id @default(uuid()) @db.Uuid
-  threadId   String      @map("thread_id") @db.Uuid
-  role       MessageRole
-  content    String
-  actionJson Json?       @map("action_json")
-  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  thread     Thread      @relation(fields: [threadId], references: [id], onDelete: Cascade)
-
-  @@index([threadId, createdAt])
-  @@map("messages")
-}
-
 model AppUser {
-  id           String             @id @db.Uuid
-  email        String             @unique
-  fullName     String?            @map("full_name")
-  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
-  memberships  TenantMembership[]
+  id          String             @id @db.Uuid
+  email       String             @unique
+  fullName    String?            @map("full_name")
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  memberships TenantMembership[]
 
   @@map("app_users")
 }
@@ -346,23 +57,23 @@ model Tenant {
   createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
   memberships    TenantMembership[]
-  projects       Project[]
   subscriptions  TenantSubscription[]
   usageCounters  UsageCounter[]
   workspaceState WorkspaceState?
+  liteWorkbooks  LiteWorkbook[]
 
   @@map("tenants")
 }
 
 model TenantMembership {
-  id         String    @id @default(uuid()) @db.Uuid
-  tenantId   String    @map("tenant_id") @db.Uuid
-  userId     String    @map("user_id") @db.Uuid
-  role       TenantRole @default(MEMBER)
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user       AppUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String     @id @default(uuid()) @db.Uuid
+  tenantId  String     @map("tenant_id") @db.Uuid
+  userId    String     @map("user_id") @db.Uuid
+  role      TenantRole @default(MEMBER)
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      AppUser    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, userId])
   @@index([userId, createdAt])
@@ -370,31 +81,31 @@ model TenantMembership {
 }
 
 model Plan {
-  id                  String               @id @default(uuid()) @db.Uuid
-  code                PlanCode             @unique
-  name                String
-  monthlyPriceCents   Int                  @default(0) @map("monthly_price_cents")
-  limitsJson          Json                 @map("limits_json")
-  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
-  subscriptions       TenantSubscription[]
+  id                String               @id @default(uuid()) @db.Uuid
+  code              PlanCode             @unique
+  name              String
+  monthlyPriceCents Int                  @default(0) @map("monthly_price_cents")
+  limitsJson        Json                 @map("limits_json")
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  subscriptions     TenantSubscription[]
 
   @@map("plans")
 }
 
 model TenantSubscription {
-  id                  String              @id @default(uuid()) @db.Uuid
-  tenantId            String              @map("tenant_id") @db.Uuid
-  planId              String              @map("plan_id") @db.Uuid
-  status              SubscriptionStatus  @default(ACTIVE)
-  stripeCustomerId    String?             @map("stripe_customer_id")
+  id                   String             @id @default(uuid()) @db.Uuid
+  tenantId             String             @map("tenant_id") @db.Uuid
+  planId               String             @map("plan_id") @db.Uuid
+  status               SubscriptionStatus @default(ACTIVE)
+  stripeCustomerId     String?            @map("stripe_customer_id")
   stripeSubscriptionId String?            @map("stripe_subscription_id")
-  currentPeriodStart  DateTime            @map("current_period_start") @db.Timestamptz(6)
-  currentPeriodEnd    DateTime            @map("current_period_end") @db.Timestamptz(6)
-  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
-  tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  plan                Plan                @relation(fields: [planId], references: [id], onDelete: Restrict)
+  currentPeriodStart   DateTime           @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd     DateTime           @map("current_period_end") @db.Timestamptz(6)
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenant               Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan                 Plan               @relation(fields: [planId], references: [id], onDelete: Restrict)
 
   @@index([tenantId, status, updatedAt])
   @@index([stripeSubscriptionId])
@@ -425,4 +136,50 @@ model WorkspaceState {
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("workspace_states")
+}
+
+model LiteWorkbook {
+  id                String      @id @default(uuid()) @db.Uuid
+  tenantId          String      @map("tenant_id") @db.Uuid
+  inputAddress      String      @map("input_address")
+  normalizedAddress String      @map("normalized_address")
+  displayAddress    String      @map("display_address")
+  workbookCsv       String      @map("workbook_csv")
+  workbookRowsJson  Json        @map("workbook_rows_json")
+  previewRowCount   Int         @default(1) @map("preview_row_count")
+  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenant            Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  links             LiteLink[]
+
+  @@unique([tenantId, normalizedAddress])
+  @@index([tenantId, updatedAt])
+  @@map("lite_workbooks")
+}
+
+model LiteLink {
+  id                     String         @id @default(uuid()) @db.Uuid
+  workbookId             String         @map("workbook_id") @db.Uuid
+  buyerEmail             String         @map("buyer_email")
+  buyerName              String?        @map("buyer_name")
+  token                  String         @unique
+  status                 LiteLinkStatus @default(GENERATED)
+  priceCents             Int            @map("price_cents")
+  currency               String         @default("usd")
+  stripeCheckoutSessionId String?       @unique @map("stripe_checkout_session_id")
+  stripePaymentIntentId  String?        @unique @map("stripe_payment_intent_id")
+  purchaserEmail         String?        @map("purchaser_email")
+  purchaserName          String?        @map("purchaser_name")
+  amountPaidCents        Int?           @map("amount_paid_cents")
+  openedAt               DateTime?      @map("opened_at") @db.Timestamptz(6)
+  paidAt                 DateTime?      @map("paid_at") @db.Timestamptz(6)
+  error                  String?
+  createdAt              DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workbook               LiteWorkbook   @relation(fields: [workbookId], references: [id], onDelete: Cascade)
+
+  @@unique([workbookId, buyerEmail])
+  @@index([status, updatedAt])
+  @@index([buyerEmail, updatedAt])
+  @@map("lite_links")
 }

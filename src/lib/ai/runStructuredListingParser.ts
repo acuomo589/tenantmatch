@@ -42,6 +42,13 @@ type ListingRecordLike = {
   tenants: [];
 };
 
+type AddressOverride = {
+  addressLine1: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+};
+
 const parserSchema = {
   name: "listing_structured_parser",
   schema: {
@@ -88,6 +95,43 @@ const parserSchema = {
 
 class RetryableParserError extends Error {}
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripTrailingLocation(value: string, city?: string, state?: string, postalCode?: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const normalizedCity = city?.trim();
+  const normalizedState = state?.trim();
+  const normalizedPostalCode = postalCode?.trim();
+  const suffixPatterns: RegExp[] = [];
+
+  if (normalizedCity && normalizedState) {
+    const cityPattern = escapeRegExp(normalizedCity);
+    const statePattern = escapeRegExp(normalizedState);
+    const postalPattern = normalizedPostalCode
+      ? `(?:\\s*${escapeRegExp(normalizedPostalCode)})?`
+      : "(?:\\s*\\d{5}(?:-\\d{4})?)?";
+
+    suffixPatterns.push(new RegExp(`^(.+),\\s*${cityPattern},\\s*${statePattern}${postalPattern}$`, "i"));
+    suffixPatterns.push(new RegExp(`^(.+),\\s*${cityPattern}\\s+${statePattern}${postalPattern}$`, "i"));
+  }
+
+  suffixPatterns.push(/^(.+),\s*[^,]+,\s*[A-Z]{2}(?:\s*\d{5}(?:-\d{4})?)?$/i);
+  suffixPatterns.push(/^(.+),\s*[A-Z]{2}(?:\s*\d{5}(?:-\d{4})?)?$/i);
+
+  for (const pattern of suffixPatterns) {
+    const match = trimmed.match(pattern);
+    if (match?.[1]?.trim()) {
+      return match[1].trim();
+    }
+  }
+
+  return trimmed;
+}
+
 function normalizeParsedListing(parsed: ParsedListing): ListingRecordLike {
   const features = (parsed.features ?? [])
     .map((feature) => feature.featureValueText?.trim() ?? "")
@@ -99,10 +143,17 @@ function normalizeParsedListing(parsed: ParsedListing): ListingRecordLike {
     .filter(Boolean)
     .map((text) => ({ text, sourceText: text, source: "PARSED" as const, isMaterial: true as const }));
 
+  const normalizedTitle = stripTrailingLocation(
+    parsed.addressLine1?.trim() || parsed.title?.trim() || "",
+    parsed.city,
+    parsed.state,
+    parsed.postalCode,
+  );
+
   return {
     id: `ai_${Math.random().toString(36).slice(2, 10)}`,
-    title: parsed.addressLine1?.trim() || parsed.title?.trim() || "Parsed Listing",
-    addressLine1: parsed.addressLine1?.trim() || "Unknown",
+    title: normalizedTitle || parsed.title?.trim() || "Parsed Listing",
+    addressLine1: normalizedTitle || "Unknown",
     city: parsed.city?.trim() || "",
     state: parsed.state?.trim() || "",
     postalCode: parsed.postalCode?.trim() || "",
@@ -133,15 +184,53 @@ function normalizeParsedListing(parsed: ParsedListing): ListingRecordLike {
   };
 }
 
-export async function runStructuredListingParser(rawText: string, signal?: AbortSignal): Promise<ListingRecordLike> {
+function parseAddressOverride(value: string): AddressOverride {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^(.+?),\s*([^,]+),\s*([A-Z]{2})\s*(\d{5})?/i);
+  if (!match) {
+    return { addressLine1: trimmed };
+  }
+
+  return {
+    addressLine1: match[1]?.trim() || trimmed,
+    city: match[2]?.trim() || undefined,
+    state: match[3]?.toUpperCase().trim() || undefined,
+    postalCode: match[4]?.trim() || undefined,
+  };
+}
+
+function applyAddressOverride(listing: ListingRecordLike, override: AddressOverride): ListingRecordLike {
+  const city = override.city ?? listing.city;
+  const state = override.state ?? listing.state;
+  const postalCode = override.postalCode ?? listing.postalCode;
+  const normalizedStreet = stripTrailingLocation(override.addressLine1 || listing.addressLine1, city, state, postalCode);
+
+  return {
+    ...listing,
+    title: normalizedStreet || listing.title,
+    addressLine1: normalizedStreet || listing.addressLine1,
+    city,
+    state,
+    postalCode,
+  };
+}
+
+export async function runStructuredListingParser(
+  rawText: string,
+  explicitAddress?: string,
+  signal?: AbortSignal,
+): Promise<ListingRecordLike> {
   const config = getAiConfig();
   if (!config.openAiApiKey) {
     throw new Error("OPENAI_API_KEY is not set.");
   }
+  const addressOverride = explicitAddress?.trim() ? parseAddressOverride(explicitAddress) : null;
+  const parserInput = addressOverride ? `Explicit listing address: ${explicitAddress}\n\n${rawText}` : rawText;
 
   console.info("[runStructuredListingParser] request", {
     model: config.listingParserModel,
-    rawTextLength: rawText.length,
+    explicitAddressProvided: Boolean(addressOverride),
+    rawTextLength: parserInput.length,
   });
 
   const maxAttempts = 2;
@@ -163,7 +252,7 @@ export async function runStructuredListingParser(rawText: string, signal?: Abort
           },
           {
             role: "user",
-            content: rawText,
+            content: parserInput,
           },
         ],
         text: {
@@ -203,7 +292,8 @@ export async function runStructuredListingParser(rawText: string, signal?: Abort
 
     if (payload.output_parsed && typeof payload.output_parsed === "object") {
       console.info("[runStructuredListingParser] using output_parsed object", { attempt });
-      return normalizeParsedListing(payload.output_parsed as ParsedListing);
+      const normalized = normalizeParsedListing(payload.output_parsed as ParsedListing);
+      return addressOverride ? applyAddressOverride(normalized, addressOverride) : normalized;
     }
 
     const extractedText =
@@ -238,7 +328,8 @@ export async function runStructuredListingParser(rawText: string, signal?: Abort
         attempt,
         extractedLength: extractedText.length,
       });
-      return normalizeParsedListing(parsed);
+      const normalized = normalizeParsedListing(parsed);
+      return addressOverride ? applyAddressOverride(normalized, addressOverride) : normalized;
     } catch {
       if (attempt < maxAttempts) {
         console.warn("[runStructuredListingParser] retrying after JSON parse failure", {

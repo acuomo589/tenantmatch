@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAiConfig } from "@/lib/ai/config";
+import { isMockAgenticFlowEnabled, MOCK_EXPLORE_OPTIONS_ANALYSIS } from "@/lib/testing/mock-agentic-flow";
 
 type ListingInput = {
   id: string;
@@ -213,6 +214,10 @@ export async function POST(request: Request) {
     const listing = body.listing;
     if (!listing?.addressLine1) {
       return NextResponse.json({ error: "listing is required" }, { status: 400 });
+    }
+
+    if (isMockAgenticFlowEnabled()) {
+      return NextResponse.json({ analysis: MOCK_EXPLORE_OPTIONS_ANALYSIS });
     }
 
     const config = getAiConfig();

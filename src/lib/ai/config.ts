@@ -5,6 +5,7 @@ export interface AiConfig {
   openAiApiKey?: string;
   openAiModel: string;
   listingParserModel: string;
+  listingResearchModel: string;
   workbookModel: string;
   exploreOptionsModel: string;
   outreachEmailModel: string;
@@ -23,6 +24,7 @@ export function getAiConfig(): AiConfig {
     openAiApiKey,
     openAiModel: process.env.AI_ANALYSIS_MODEL ?? "gpt-4.1-mini",
     listingParserModel: process.env.AI_LISTING_PARSER_MODEL ?? "o3-mini",
+    listingResearchModel: process.env.AI_LISTING_RESEARCH_MODEL ?? "gpt-5.4",
     workbookModel: process.env.AI_WORKBOOK_MODEL ?? "gpt-5.4",
     exploreOptionsModel: process.env.AI_EXPLORE_OPTIONS_MODEL ?? "gpt-5.4",
     outreachEmailModel: process.env.AI_OUTREACH_EMAIL_MODEL ?? "gpt-4o",

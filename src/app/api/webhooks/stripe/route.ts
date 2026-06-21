@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { getStripeClient } from "@/lib/billing/stripe";
 import { PLAN_CATALOG } from "@/lib/billing/plans";
+import { markLiteLinkFailed, markLiteLinkPaid } from "@/lib/lite/store";
 import { prisma } from "@/lib/db";
 
 function resolvePlanCodeFromPriceId(priceId?: string | null): "FREE" | "PLUS" | "PRO" | null {
@@ -24,6 +25,36 @@ export async function POST(request: Request) {
 
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
+      const liteLinkToken = session.metadata?.liteLinkToken;
+      const checkoutKind = session.metadata?.kind;
+
+      if (checkoutKind === "lite_link" && liteLinkToken) {
+        const paidEmail =
+          session.customer_details?.email?.trim().toLowerCase() ??
+          session.customer_email?.trim().toLowerCase() ??
+          null;
+        const expectedEmail = session.metadata?.buyerEmail?.trim().toLowerCase() ?? null;
+
+        if (!paidEmail || !expectedEmail || paidEmail !== expectedEmail) {
+          await markLiteLinkFailed(
+            liteLinkToken,
+            `Checkout email mismatch. Expected ${expectedEmail ?? "unknown"} but received ${paidEmail ?? "none"}.`,
+          );
+          return NextResponse.json({ received: true });
+        }
+
+        await markLiteLinkPaid({
+          token: liteLinkToken,
+          purchaserEmail: session.customer_details?.email ?? session.customer_email ?? null,
+          purchaserName: session.customer_details?.name ?? null,
+          amountPaidCents: session.amount_total ?? null,
+          stripeCheckoutSessionId: session.id,
+          stripePaymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : null,
+        });
+
+        return NextResponse.json({ received: true });
+      }
+
       const tenantId = session.metadata?.tenantId;
       const subscriptionId = typeof session.subscription === "string" ? session.subscription : null;
 

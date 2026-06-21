@@ -3,17 +3,23 @@ import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
-const buttonVariants = cva("ui-btn", {
+const buttonVariants = cva(
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  {
   variants: {
     variant: {
-      default: "ui-btn-default",
-      secondary: "ui-btn-secondary",
-      outline: "ui-btn-outline",
-      ghost: "ui-btn-ghost",
+      default: "bg-primary text-primary-foreground shadow-xs hover:bg-primary/92",
+      secondary: "bg-secondary text-secondary-foreground shadow-xs hover:bg-secondary/80",
+      outline: "border border-input bg-background shadow-xs hover:bg-accent hover:text-accent-foreground",
+      ghost: "hover:bg-accent hover:text-accent-foreground",
+      destructive: "bg-destructive text-destructive-foreground shadow-xs hover:bg-destructive/90",
+      link: "h-auto px-0 py-0 text-primary underline-offset-4 hover:underline",
     },
     size: {
-      default: "ui-btn-md",
-      sm: "ui-btn-sm",
+      default: "h-10 px-4 py-2",
+      sm: "h-8 rounded-md px-3 text-xs",
+      lg: "h-11 rounded-md px-8",
+      icon: "size-10",
     },
   },
   defaultVariants: {
