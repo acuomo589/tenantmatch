@@ -4,7 +4,7 @@ import type { ListingIntake } from "@/lib/types";
 import { Client as LangSmithClient } from "langsmith";
 
 const DEFAULT_HEADERS =
-  "business_name,category,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,owner_contact_name";
+  "business_name,category,property_type,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,rationale,owner_contact_name";
 
 function getLangSmithClient() {
   const config = getAiConfig();
@@ -40,7 +40,7 @@ async function withLangSmithTrace<T>(input: {
       start_time: new Date().toISOString(),
       extra: {
         metadata: {
-          service: "timpani-proto",
+          service: "tenantmatch",
           provider: config.provider,
         },
       },
@@ -123,15 +123,25 @@ function generateMockCsv(intake: ListingIntake): string {
     const move = Math.max(3, 9 - Math.floor(i / 3));
     const name = i < pool.length ? seed.name : `${seed.name} ${i + 1}`;
     const summary = `${name} aligns with ${intake.propertyType} constraints in a ${intake.radiusMiles}-mile search, with owner incentives (${intake.ownerIncentives || "standard TI package"}) supporting conversion.`;
+    const rationale =
+      intake.propertyType === "Industrial"
+        ? "Clear height and loading fit industrial users; highway access supports logistics economics."
+        : intake.propertyType === "Office"
+          ? "Amenity access and commute convenience support recruiting; move fits flight-to-quality logic."
+          : intake.propertyType === "Restaurant / Hospitality"
+            ? "Open daypart and visible frontage support restaurant demand; no direct co-tenant overlap is assumed."
+            : "Parking, visibility, and surrounding demand support the concept; no direct co-tenant overlap is assumed.";
 
     rows.push(
       [
         name,
         seed.category,
+        intake.propertyType,
         fit,
         move,
         i + 1,
         `"${summary.replace(/"/g, '""').slice(0, 400)}"`,
+        `"${rationale.replace(/"/g, '""').slice(0, 300)}"`,
         "N/A",
       ].join(","),
     );

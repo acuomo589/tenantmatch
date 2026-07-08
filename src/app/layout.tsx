@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import "@/app/globals.css";
 
 export const metadata = {
-  title: "Timpani Lite",
+  title: "TenantMatch",
   description: "Sheet-driven paid workbook links",
 };
 

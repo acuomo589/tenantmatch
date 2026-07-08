@@ -20,13 +20,14 @@ function buildPageContent(lines: string[]): string {
 
 export function createLiteWorkbookPdf(args: { address: string; rows: WorkbookRow[] }): Buffer {
   const contentLines = [
-    `Timpani Lite Workbook`,
+    `TenantMatch Workbook`,
     args.address,
     "",
-    "Rank | Business | Category | Location | Fit | Move | Summary",
+    "Rank | Business | Category | Property Type | Location | Fit | Move | Summary | Rationale",
     ...args.rows.flatMap((row) => [
-      `${row.priority_rank}. ${row.business_name} | ${row.category} | ${row.city}, ${row.state} | ${row.tenant_fit_score_100}/100 | ${row.move_probability_1_10}/10`,
+      `${row.priority_rank}. ${row.business_name} | ${row.category} | ${row.property_type} | ${row.city}, ${row.state} | ${row.tenant_fit_score_100}/100 | ${row.move_probability_1_10}/10`,
       `    ${row.fit_summary.slice(0, 140)}`,
+      `    ${row.rationale.slice(0, 120)}`,
     ]),
   ];
 

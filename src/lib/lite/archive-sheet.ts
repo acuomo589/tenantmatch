@@ -1,5 +1,6 @@
 import type { SheetCellUpdate } from "@/lib/lite/google-sheet";
 import type { LiteLinkRecord, LiteLinkStatus, LiteLinkWithWorkbook, LiteWorkbookRecord } from "@/lib/lite/types";
+import { buildLiteAdminLinkUrl } from "@/lib/lite/url";
 import { parseWorkbookCsv } from "@/lib/workbookCsv";
 
 const TRUE_VALUES = new Set(["true", "1", "yes"]);
@@ -15,7 +16,10 @@ export const LITE_ARCHIVE_HEADERS = [
   "input_address",
   "display_address",
   "normalized_address",
+  "site_context_json",
+  "site_context_generated_at",
   "workbook_csv",
+  "workbook_csv_data",
   "preview_row_count",
   "price_cents",
   "currency",
@@ -47,6 +51,9 @@ export type LiteArchiveRow = {
   inputAddress: string;
   displayAddress: string;
   normalizedAddress: string;
+  siteContextJson: string | null;
+  siteContextGeneratedAt: Date | null;
+  adminLink: string;
   workbookCsv: string;
   previewRowCount: number;
   priceCents: number;
@@ -99,6 +106,18 @@ function parseDate(value: string): Date | null {
 
 function parseBoolean(value: string): boolean {
   return TRUE_VALUES.has(value.trim().toLowerCase());
+}
+
+function looksLikeLinkValue(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim());
+}
+
+function looksLikeAdminLinkValue(value: string): boolean {
+  return /\/a\/[^/?#]+/i.test(value.trim());
+}
+
+function looksLikeWorkbookCsvValue(value: string): boolean {
+  return value.includes("business_name,") || value.includes("\n");
 }
 
 function stringifyNullable(value: string | number | null | undefined): string {
@@ -168,6 +187,8 @@ export function parseArchiveTable(values: string[][], tabName: string): LiteArch
     const row = values[index] ?? [];
     const token = readCell(row, headerIndex.get("token"));
     if (!token) continue;
+    const workbookCsvCell = readCell(row, headerIndex.get("workbook_csv"));
+    const workbookCsvDataCell = readCell(row, headerIndex.get("workbook_csv_data"));
 
     const paid = parseBoolean(readCell(row, headerIndex.get("paid")));
     const openedAt = parseDate(readCell(row, headerIndex.get("opened_at")));
@@ -186,7 +207,13 @@ export function parseArchiveTable(values: string[][], tabName: string): LiteArch
       inputAddress: readCell(row, headerIndex.get("input_address")),
       displayAddress: readCell(row, headerIndex.get("display_address")),
       normalizedAddress: readCell(row, headerIndex.get("normalized_address")),
-      workbookCsv: readCell(row, headerIndex.get("workbook_csv")),
+      siteContextJson: readCell(row, headerIndex.get("site_context_json")) || null,
+      siteContextGeneratedAt: parseDate(readCell(row, headerIndex.get("site_context_generated_at"))),
+      adminLink:
+        looksLikeLinkValue(workbookCsvCell) && looksLikeAdminLinkValue(workbookCsvCell)
+          ? workbookCsvCell
+          : buildLiteAdminLinkUrl(token),
+      workbookCsv: workbookCsvDataCell || (looksLikeWorkbookCsvValue(workbookCsvCell) ? workbookCsvCell : ""),
       previewRowCount: parseInteger(readCell(row, headerIndex.get("preview_row_count")), 1),
       priceCents: parseInteger(readCell(row, headerIndex.get("price_cents")), 0),
       currency: readCell(row, headerIndex.get("currency")) || "usd",
@@ -264,7 +291,10 @@ export function buildArchiveRowUpdates(
     input_address: row.inputAddress,
     display_address: row.displayAddress,
     normalized_address: row.normalizedAddress,
-    workbook_csv: row.workbookCsv,
+    site_context_json: stringifyNullable(row.siteContextJson),
+    site_context_generated_at: formatDate(row.siteContextGeneratedAt),
+    workbook_csv: row.adminLink || buildLiteAdminLinkUrl(row.token),
+    workbook_csv_data: row.workbookCsv,
     preview_row_count: stringifyNullable(row.previewRowCount),
     price_cents: stringifyNullable(row.priceCents),
     currency: row.currency,
@@ -290,6 +320,28 @@ export function buildArchiveRowUpdates(
   }));
 }
 
+export function buildArchiveNormalizationUpdates(values: string[][], tabName: string): SheetCellUpdate[] {
+  const headerState = buildArchiveHeaderState(values, tabName);
+  const table = parseArchiveTable(values, tabName);
+  const updates: SheetCellUpdate[] = [];
+
+  for (const row of table.rows) {
+    const sourceRow = values[row.rowNumber - 1] ?? [];
+    const workbookCsvCell = readCell(sourceRow, headerState.headerIndex.get("workbook_csv"));
+    const workbookCsvDataCell = readCell(sourceRow, headerState.headerIndex.get("workbook_csv_data"));
+    const expectedAdminLink = row.adminLink || buildLiteAdminLinkUrl(row.token);
+    const expectedWorkbookCsvData = row.workbookCsv;
+
+    if (workbookCsvCell === expectedAdminLink && workbookCsvDataCell === expectedWorkbookCsvData) {
+      continue;
+    }
+
+    updates.push(...buildArchiveRowUpdates(tabName, row.rowNumber, headerState.headerIndex, row));
+  }
+
+  return updates;
+}
+
 function buildWorkbookId(row: LiteArchiveRow): string {
   return `${row.tenantId || "tenant"}:${row.normalizedAddress || row.token}`;
 }
@@ -301,7 +353,12 @@ export function toLiteLinkWithWorkbook(
   },
 ): LiteLinkWithWorkbook {
   const workbookRowsJson =
-    !row.workbookCsv.trim() && options?.allowEmptyWorkbook ? [] : parseWorkbookCsv(row.workbookCsv);
+    !row.workbookCsv.trim() && options?.allowEmptyWorkbook
+      ? []
+      : parseWorkbookCsv(row.workbookCsv, {
+          allowLegacyRationale: true,
+          allowLegacyPropertyType: true,
+        });
 
   const workbook: LiteWorkbookRecord = {
     id: buildWorkbookId(row),
@@ -309,6 +366,8 @@ export function toLiteLinkWithWorkbook(
     inputAddress: row.inputAddress,
     normalizedAddress: row.normalizedAddress,
     displayAddress: row.displayAddress || row.inputAddress,
+    siteContextJson: row.siteContextJson,
+    siteContextGeneratedAt: row.siteContextGeneratedAt,
     workbookCsv: row.workbookCsv,
     workbookRowsJson,
     previewRowCount: row.previewRowCount,

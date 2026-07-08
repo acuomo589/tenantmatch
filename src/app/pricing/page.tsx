@@ -2,8 +2,8 @@ import Link from "next/link";
 import { PLAN_CATALOG, getPlanDisplayPrice } from "@/lib/billing/plans";
 
 export const metadata = {
-  title: "Pricing | Timpani",
-  description: "Simple self-serve pricing for Timpani: Free, Plus, and Pro tiers.",
+  title: "Pricing | TenantMatch",
+  description: "Simple self-serve pricing for TenantMatch: Free, Plus, and Pro tiers.",
 };
 
 export default function PricingPage() {

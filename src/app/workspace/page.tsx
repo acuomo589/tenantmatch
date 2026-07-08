@@ -60,6 +60,7 @@ export default async function WorkspacePage() {
               <div className="text-[11px] font-semibold uppercase tracking-[0.14em]">Sheet columns</div>
               <div className="mt-2 leading-6">Required: `listing_address`, `email`</div>
               <div className="leading-6">Optional: `broker_name`</div>
+              <div className="leading-6">Optional: `site_context`, `site_context_image_urls`, `force_regenerate`</div>
               <div className="leading-6">Output: `link`, `error` (auto-created)</div>
             </div>
             <div className="rounded-[1.5rem] border bg-muted/25 px-4 py-4">

@@ -45,12 +45,12 @@ async function loadWorkbookPrompt(): Promise<string> {
   const prompt = await readFile(promptPath, "utf8");
   const trimmed = prompt.trim();
   if (!trimmed) {
-    return [
-      "Return ONLY CSV with this exact header order:",
-      "business_name,category,city,state,distance_miles,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,owner_contact_name",
-      "Generate 20 rows with realistic tenant prospects based on the listing context.",
-      "Do not wrap in markdown fences.",
-    ].join("\n");
+      return [
+        "Return ONLY CSV with this exact header order:",
+        "business_name,category,property_type,city,state,distance_miles,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,rationale,owner_contact_name",
+        "Generate 20 rows with realistic tenant prospects based on the listing context.",
+        "Do not wrap in markdown fences.",
+      ].join("\n");
   }
   return trimmed;
 }

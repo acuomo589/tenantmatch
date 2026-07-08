@@ -26,7 +26,7 @@ export default async function LandingPage() {
       <section className="card" style={{ width: "100%", maxWidth: 840, padding: 28, display: "grid", gap: 18 }}>
         <div style={{ display: "grid", gap: 8 }}>
           <p style={{ fontSize: 12, letterSpacing: 1.1, textTransform: "uppercase", color: "#1d4ed8", fontWeight: 700 }}>
-            Timpani Lite
+            TenantMatch
           </p>
           <h1 style={{ fontSize: 42, lineHeight: 1.05, fontWeight: 800 }}>
             Turn sheet rows into paid workbook links.

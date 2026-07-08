@@ -160,6 +160,7 @@ Fields (in exact order):
 
 business_name
 category
+property_type (repeat the STEP 1 inferred listing type for this row)
 city
 state
 distance_miles
@@ -167,6 +168,7 @@ tenant_fit_score_100
 move_probability_1_10
 priority_rank
 fit_summary (≤400 chars)
+rationale (required, ≤300 chars, immediately after fit_summary)
 owner_contact_name (or N/A)
 
 ---
@@ -178,6 +180,20 @@ Each summary must include:
 - What constraint they have
 - What incentive unlocks the deal
 - Positioning angle
+
+RATIONALE REQUIREMENTS
+
+Each rationale must state the type-specific reason this candidate fits this property and cite a
+concrete observed signal.
+
+- Retail / Restaurant: cite the co-tenancy relationship or open lane it fills, confirm no visible
+  co-tenant overlap, and reference the anchor when present.
+- Office: cite the move trigger plus the building-class or amenity/talent factor. Do not make a
+  co-tenancy claim.
+- Industrial: cite the gating spec match plus the location/logistics economics. Clustering is
+  positive, never a veto.
+- Medical: cite the payer-mix or demographic match plus clustering or hospital-proximity referral
+  logic. Veto only same-specialty duplication.
 
 ---
 

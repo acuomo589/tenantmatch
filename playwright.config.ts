@@ -19,7 +19,7 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 120_000,
     env: {
-      TIMPANI_MOCK_AGENTIC_FLOW: "1",
+      TENANTMATCH_MOCK_AGENTIC_FLOW: "1",
       NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3000",
       NEXT_PUBLIC_LOCAL_PERSISTENCE_MODE: "local",
       NEXT_PUBLIC_LOCAL_PERSISTENCE: "1",

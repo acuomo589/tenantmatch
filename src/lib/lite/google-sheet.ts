@@ -17,6 +17,9 @@ type GoogleSheetMetadata = {
     properties?: {
       sheetId?: number;
       title?: string;
+      gridProperties?: {
+        columnCount?: number;
+      };
     };
   }>;
 };
@@ -28,6 +31,7 @@ type LiteSheetTabs = {
 
 export type LiteSheetAdapter = {
   tabs: LiteSheetTabs;
+  ensureTabs(tabNames: string[]): Promise<void>;
   readValues(tabName: string): Promise<string[][]>;
   writeValues(updates: SheetCellUpdate[]): Promise<void>;
 };
@@ -88,7 +92,16 @@ function getMockState(): MockSheetState {
   return created;
 }
 
-export function resetMockLiteSheetValues(values?: string[][]): void {
+export function resetMockLiteSheetValues(values?: string[][] | Record<string, string[][]>): void {
+  if (values && !Array.isArray(values)) {
+    globalThis.__timpani_lite_mock_sheet_state__ = {
+      tabs: Object.fromEntries(
+        Object.entries(values).map(([tabName, rows]) => [tabName, rows.map((row) => [...row])]),
+      ),
+    };
+    return;
+  }
+
   globalThis.__timpani_lite_mock_sheet_state__ = {
     tabs: {
       [DEFAULT_MOCK_INTAKE_TAB_NAME]: (values ?? DEFAULT_MOCK_VALUES).map((row) => [...row]),
@@ -156,7 +169,7 @@ async function getGoogleAccessToken(): Promise<string> {
 
 async function loadSpreadsheetMetadata(spreadsheetId: string, accessToken: string): Promise<GoogleSheetMetadata> {
   const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.sheetId,sheets.properties.title`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.sheetId,sheets.properties.title,sheets.properties.gridProperties.columnCount`,
     {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -213,20 +226,64 @@ function hasSheetTab(metadata: GoogleSheetMetadata, title: string): boolean {
   return metadata.sheets.some((sheet) => sheet.properties?.title?.trim() === title);
 }
 
+function getSheetProperties(metadata: GoogleSheetMetadata, title: string) {
+  return metadata.sheets.find((sheet) => sheet.properties?.title?.trim() === title)?.properties;
+}
+
+async function ensureGoogleSheetColumnCapacity(args: {
+  spreadsheetId: string;
+  accessToken: string;
+  sheetId: number;
+  currentColumnCount: number;
+  requiredColumnCount: number;
+}): Promise<void> {
+  if (args.requiredColumnCount <= args.currentColumnCount) {
+    return;
+  }
+
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${args.spreadsheetId}:batchUpdate`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${args.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      requests: [
+        {
+          updateSheetProperties: {
+            properties: {
+              sheetId: args.sheetId,
+              gridProperties: {
+                columnCount: args.requiredColumnCount,
+              },
+            },
+            fields: "gridProperties.columnCount",
+          },
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to expand sheet columns: ${response.status} ${await response.text()}`);
+  }
+}
+
 async function createGoogleSheetAdapter(): Promise<LiteSheetAdapter> {
   const config = getLiteConfig();
   if (!config.googleSpreadsheetId) {
     throw new Error("LITE_GOOGLE_SHEET_URL is not configured or could not be parsed.");
   }
+  const spreadsheetId = config.googleSpreadsheetId;
 
   const accessToken = await getGoogleAccessToken();
-  let metadata = await loadSpreadsheetMetadata(config.googleSpreadsheetId, accessToken);
+  let metadata = await loadSpreadsheetMetadata(spreadsheetId, accessToken);
   const intakeTabName = resolveIntakeTabName(metadata, config.googleSheetTabName);
   const archiveTabName = config.googleLinksTabName;
 
   if (!hasSheetTab(metadata, archiveTabName)) {
-    await createGoogleSheetTab(config.googleSpreadsheetId, accessToken, archiveTabName);
-    metadata = await loadSpreadsheetMetadata(config.googleSpreadsheetId, accessToken);
+    await createGoogleSheetTab(spreadsheetId, accessToken, archiveTabName);
+    metadata = await loadSpreadsheetMetadata(spreadsheetId, accessToken);
   }
 
   if (!hasSheetTab(metadata, intakeTabName)) {
@@ -237,6 +294,16 @@ async function createGoogleSheetAdapter(): Promise<LiteSheetAdapter> {
     tabs: {
       intakeTabName,
       archiveTabName,
+    },
+    async ensureTabs(tabNames) {
+      for (const tabName of tabNames) {
+        if (hasSheetTab(metadata, tabName)) {
+          continue;
+        }
+
+        await createGoogleSheetTab(spreadsheetId, accessToken, tabName);
+        metadata = await loadSpreadsheetMetadata(spreadsheetId, accessToken);
+      }
     },
     async readValues(tabName) {
       const range = `${quoteSheetTitle(tabName)}!A:ZZ`;
@@ -259,8 +326,38 @@ async function createGoogleSheetAdapter(): Promise<LiteSheetAdapter> {
     async writeValues(updates) {
       if (!updates.length) return;
 
+      const requiredColumnsByTab = new Map<string, number>();
+      for (const update of updates) {
+        const nextRequired = update.columnIndex + 1;
+        const currentRequired = requiredColumnsByTab.get(update.tabName) ?? 0;
+        if (nextRequired > currentRequired) {
+          requiredColumnsByTab.set(update.tabName, nextRequired);
+        }
+      }
+
+      for (const [tabName, requiredColumnCount] of requiredColumnsByTab) {
+        const properties = getSheetProperties(metadata, tabName);
+        const sheetId = properties?.sheetId;
+        const currentColumnCount = properties?.gridProperties?.columnCount ?? 26;
+
+        if (sheetId == null) {
+          throw new Error(`Could not resolve sheet id for "${tabName}".`);
+        }
+
+        if (requiredColumnCount > currentColumnCount) {
+          await ensureGoogleSheetColumnCapacity({
+            spreadsheetId,
+            accessToken,
+            sheetId,
+            currentColumnCount,
+            requiredColumnCount,
+          });
+          metadata = await loadSpreadsheetMetadata(spreadsheetId, accessToken);
+        }
+      }
+
       const response = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${config.googleSpreadsheetId}/values:batchUpdate`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
         {
           method: "POST",
           headers: {
@@ -278,7 +375,7 @@ async function createGoogleSheetAdapter(): Promise<LiteSheetAdapter> {
       );
 
       if (!response.ok) {
-        throw new Error(`Failed to write sheet values: ${response.status}`);
+        throw new Error(`Failed to write sheet values: ${response.status} ${await response.text()}`);
       }
     },
   };
@@ -302,6 +399,11 @@ function createMockSheetAdapter(): LiteSheetAdapter {
     tabs: {
       intakeTabName,
       archiveTabName,
+    },
+    async ensureTabs(tabNames) {
+      for (const tabName of tabNames) {
+        ensureMockTab(state, tabName);
+      }
     },
     async readValues(tabName) {
       ensureMockTab(state, tabName);

@@ -73,7 +73,9 @@ async function hydrateArchiveWorkbook(row: LiteArchiveRow): Promise<LiteArchiveR
     return existing;
   }
 
-  const generated = await generateLiteWorkbookFromAddress(existing.inputAddress || existing.displayAddress);
+  const generated = await generateLiteWorkbookFromAddress(existing.inputAddress || existing.displayAddress, {
+    siteContextJson: existing.siteContextJson,
+  });
   const next: LiteArchiveRow = {
     ...cloneArchiveRow(existing),
     displayAddress: generated.displayAddress,

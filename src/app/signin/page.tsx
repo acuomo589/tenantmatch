@@ -43,7 +43,7 @@ export default function SignInPage() {
   return (
     <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
       <section className="card" style={{ width: "100%", maxWidth: 420, padding: 20, display: "grid", gap: 12 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700 }}>Sign in to Timpani</h1>
+        <h1 style={{ fontSize: 24, fontWeight: 700 }}>Sign in to TenantMatch</h1>
         <p style={{ color: "#64748b", fontSize: 14 }}>Use magic link authentication. No password needed.</p>
         <form onSubmit={onSubmit} style={{ display: "grid", gap: 10 }}>
           <input

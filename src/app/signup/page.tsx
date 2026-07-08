@@ -49,7 +49,7 @@ export default function SignUpPage() {
   return (
     <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
       <section className="card" style={{ width: "100%", maxWidth: 460, padding: 20, display: "grid", gap: 12 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700 }}>Create your Timpani workspace</h1>
+        <h1 style={{ fontSize: 24, fontWeight: 700 }}>Create your TenantMatch workspace</h1>
         <p style={{ color: "#64748b", fontSize: 14 }}>Start on Free. Upgrade when your team needs more capacity.</p>
         <form onSubmit={onSubmit} style={{ display: "grid", gap: 10 }}>
           <input

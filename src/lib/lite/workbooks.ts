@@ -36,6 +36,7 @@ function buildWorkbookCsv(rows: WorkbookRow[]): string {
   const headers = [
     "business_name",
     "category",
+    "property_type",
     "city",
     "state",
     "distance_miles",
@@ -43,6 +44,7 @@ function buildWorkbookCsv(rows: WorkbookRow[]): string {
     "move_probability_1_10",
     "priority_rank",
     "fit_summary",
+    "rationale",
     "owner_contact_name",
   ];
 
@@ -52,6 +54,7 @@ function buildWorkbookCsv(rows: WorkbookRow[]): string {
       [
         row.business_name,
         row.category,
+        row.property_type,
         row.city,
         row.state,
         row.distance_miles,
@@ -59,6 +62,7 @@ function buildWorkbookCsv(rows: WorkbookRow[]): string {
         row.move_probability_1_10,
         row.priority_rank,
         row.fit_summary,
+        row.rationale,
         row.owner_contact_name,
       ]
         .map(escapeCsvCell)
@@ -74,6 +78,7 @@ function buildMockLiteWorkbookRows(): WorkbookRow[] {
     seeded.push({
       business_name: EXTRA_MOCK_NAMES[index - MOCK_WORKBOOK_ROWS.length] ?? `Prospect ${index + 1}`,
       category: index % 2 === 0 ? "Service logistics" : "Industrial supply",
+      property_type: "Industrial",
       city: index % 3 === 0 ? "Columbus" : "Gahanna",
       state: "OH",
       distance_miles: Number((4.5 + index * 0.7).toFixed(1)),
@@ -81,6 +86,7 @@ function buildMockLiteWorkbookRows(): WorkbookRow[] {
       move_probability_1_10: Math.max(4, 9 - Math.floor(index / 4)),
       priority_rank: index + 1,
       fit_summary: "Operationally aligned with the building's access, loading profile, and flexible bay depth.",
+      rationale: "Clear height and loading fit light industrial users; regional highway access supports distribution economics.",
       owner_contact_name: `Contact ${index + 1}`,
     });
   }
@@ -160,6 +166,24 @@ async function repairWorkbookCsv(args: {
   csvCandidate: string;
   parseError: string;
 }): Promise<string | undefined> {
+  const propertyTypeFixInstructions = args.parseError.toLowerCase().includes("property_type")
+    ? [
+        "Every row MUST include `property_type` immediately after `category` and before `city`.",
+        "Use one exact listing type per row: Industrial, Retail / Restaurant, Office, Medical, or Mixed-use.",
+        "Repeat the inferred listing type consistently across all rows for the same workbook unless the property is truly mixed-use.",
+      ]
+    : [];
+  const rationaleFixInstructions = args.parseError.toLowerCase().includes("rationale")
+    ? [
+        "Every row MUST include `rationale` immediately after `fit_summary` and before `owner_contact_name`.",
+        "Each rationale must be <=300 chars and cite a concrete property-fit signal.",
+        "Retail / restaurant rationale must cite anchor, co-tenancy, open lane, or no-overlap logic.",
+        "Office rationale must cite move trigger plus building-class, commute, recruiting, or amenity logic.",
+        "Industrial rationale must cite clear height, dock, power, yard, highway access, logistics, or labor logic.",
+        "Medical rationale must cite payer mix, demographics, specialty clustering, hospital proximity, or referral logic.",
+      ]
+    : [];
+
   return requestWorkbookCsv({
     apiKey: args.apiKey,
     model: args.model,
@@ -169,6 +193,8 @@ async function repairWorkbookCsv(args: {
       "You are now fixing CSV format or row-count issues.",
       `Return ONLY valid CSV with exactly ${LITE_WORKBOOK_ROW_COUNT} data rows.`,
       "Preserve the same overall prospect intent while fixing formatting and row count.",
+      ...propertyTypeFixInstructions,
+      ...rationaleFixInstructions,
     ].join("\n"),
     userContent: [
       args.userContent,
@@ -181,7 +207,12 @@ async function repairWorkbookCsv(args: {
   });
 }
 
-export async function generateLiteWorkbookFromAddress(inputAddress: string): Promise<{
+export async function generateLiteWorkbookFromAddress(
+  inputAddress: string,
+  options?: {
+    siteContextJson?: string | null;
+  },
+): Promise<{
   displayAddress: string;
   csv: string;
   rows: WorkbookRow[];
@@ -203,7 +234,13 @@ export async function generateLiteWorkbookFromAddress(inputAddress: string): Pro
   }
 
   const workbookPrompt = buildLiteWorkbookPrompt();
-  const userContent = `Address: ${displayAddress}\n\nReturn the workbook now.`;
+  const userContent = [
+    `Address: ${displayAddress}`,
+    options?.siteContextJson?.trim()
+      ? `\n\nSite context JSON:\n${options.siteContextJson}\n\nUse the supplied site context as stronger evidence than generic geocoding assumptions.`
+      : "",
+    "\n\nReturn the workbook now.",
+  ].join("");
   const attemptModels = [config.workbookModel, config.openAiModel];
   let lastError = "Model returned no workbook CSV.";
 
@@ -247,6 +284,28 @@ export async function generateLiteWorkbookFromAddress(inputAddress: string): Pro
         };
       } catch (repairError) {
         lastError = repairError instanceof Error ? repairError.message : lastError;
+
+        const validationRepairCsv = await repairWorkbookCsv({
+          apiKey: config.openAiApiKey,
+          model,
+          workbookPrompt,
+          userContent,
+          csvCandidate: repairedCsv,
+          parseError: lastError,
+        });
+
+        if (!validationRepairCsv) continue;
+
+        try {
+          const rows = canonicalizeWorkbookRows(parseWorkbookCsv(validationRepairCsv));
+          return {
+            displayAddress,
+            csv: buildWorkbookCsv(rows),
+            rows,
+          };
+        } catch (validationRepairError) {
+          lastError = validationRepairError instanceof Error ? validationRepairError.message : lastError;
+        }
       }
     }
   }

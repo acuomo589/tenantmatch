@@ -51,7 +51,7 @@ test("mock flow cannot be enabled in production", async () => {
   const { isMockAgenticFlowEnabled } = await import("../../src/lib/testing/mock-agentic-flow");
 
   setNodeEnv("production");
-  process.env.TIMPANI_MOCK_AGENTIC_FLOW = "1";
+  process.env.TENANTMATCH_MOCK_AGENTIC_FLOW = "1";
 
   assert.throws(() => isMockAgenticFlowEnabled(), /cannot be enabled in production/i);
 });

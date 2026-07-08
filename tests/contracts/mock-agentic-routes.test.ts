@@ -7,7 +7,7 @@ import {
 } from "../../src/lib/testing/mock-agentic-flow";
 import { parseWorkbookCsv } from "../../src/lib/workbookCsv";
 
-process.env.TIMPANI_MOCK_AGENTIC_FLOW = "1";
+process.env.TENANTMATCH_MOCK_AGENTIC_FLOW = "1";
 
 test("parser route returns a usable listing record in mock mode", async () => {
   const { POST } = await import("../../src/app/api/listings/parse/route");

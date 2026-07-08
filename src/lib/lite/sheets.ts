@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+  buildArchiveNormalizationUpdates,
   buildArchiveHeaderState,
   buildArchiveRowUpdates,
   createArchiveLookupMaps,
@@ -17,15 +18,20 @@ import {
   type SheetCellUpdate,
 } from "@/lib/lite/google-sheet";
 import type { LiteProcessSummary, LiteSheetRow } from "@/lib/lite/types";
-import { buildLiteLinkUrl } from "@/lib/lite/url";
+import { generateLiteSiteContext, normalizeSiteContextImageRefs } from "@/lib/lite/site-context";
+import { buildLiteAdminLinkUrl, buildLiteLinkUrl } from "@/lib/lite/url";
 import { generateLiteWorkbookFromAddress } from "@/lib/lite/workbooks";
 
 const ADDRESS_HEADERS = ["address", "listing_address"] as const;
 const BUYER_EMAIL_HEADERS = ["buyer_email", "email"] as const;
 const BUYER_NAME_HEADERS = ["buyer_name", "broker_name"] as const;
+const SITE_CONTEXT_HEADERS = ["site_context", "co_tenancy_notes", "cotenancy_notes", "site_notes"] as const;
+const SITE_CONTEXT_IMAGE_HEADERS = ["site_context_image_urls", "site_context_image_url", "map_image_urls", "map_image_url"] as const;
+const FORCE_REGENERATE_HEADERS = ["force_regenerate", "refresh_workbook", "rerun"] as const;
 const LINK_HEADERS = ["link", "paywall_url", "payment_url"] as const;
 const ERROR_HEADERS = ["error"] as const;
 const MAX_SHEET_CELL_LENGTH = 50_000;
+const TRUE_VALUES = new Set(["true", "1", "yes", "y"]);
 
 function normalizeHeader(value: string | undefined): string {
   return (value ?? "").trim().toLowerCase();
@@ -37,6 +43,10 @@ function findHeaderIndex(headers: string[], aliases: readonly string[]): number 
 
 function readCell(row: string[] | undefined, index: number): string {
   return index >= 0 ? (row?.[index] ?? "").trim() : "";
+}
+
+function parseBooleanCell(value: string): boolean {
+  return TRUE_VALUES.has(value.trim().toLowerCase());
 }
 
 function createLiteToken(): string {
@@ -69,6 +79,9 @@ function parseIntakeSheetValues(values: string[][], tabName: string): {
   const addressIndex = findHeaderIndex(headers, ADDRESS_HEADERS);
   const buyerEmailIndex = findHeaderIndex(headers, BUYER_EMAIL_HEADERS);
   const buyerNameIndex = findHeaderIndex(headers, BUYER_NAME_HEADERS);
+  const siteContextIndex = findHeaderIndex(headers, SITE_CONTEXT_HEADERS);
+  const siteContextImageIndex = findHeaderIndex(headers, SITE_CONTEXT_IMAGE_HEADERS);
+  const forceRegenerateIndex = findHeaderIndex(headers, FORCE_REGENERATE_HEADERS);
   const existingLinkIndex = findHeaderIndex(headers, LINK_HEADERS);
   const existingErrorIndex = findHeaderIndex(headers, ERROR_HEADERS);
 
@@ -109,6 +122,9 @@ function parseIntakeSheetValues(values: string[][], tabName: string): {
     const address = readCell(row, addressIndex);
     const buyerEmail = readCell(row, buyerEmailIndex);
     const buyerName = buyerNameIndex >= 0 ? readCell(row, buyerNameIndex) || null : null;
+    const siteContextHint = siteContextIndex >= 0 ? readCell(row, siteContextIndex) || null : null;
+    const siteContextImageRefs = siteContextImageIndex >= 0 ? normalizeSiteContextImageRefs(readCell(row, siteContextImageIndex)) : [];
+    const forceRegenerate = forceRegenerateIndex >= 0 ? parseBooleanCell(readCell(row, forceRegenerateIndex)) : false;
     const link = readCell(row, existingLinkIndex);
     const error = readCell(row, existingErrorIndex) || null;
 
@@ -129,6 +145,9 @@ function parseIntakeSheetValues(values: string[][], tabName: string): {
       buyerName,
       link,
       error,
+      siteContextHint,
+      siteContextImageRefs,
+      forceRegenerate,
     });
   }
 
@@ -147,11 +166,14 @@ function createArchiveRow(args: {
   tenantId: string;
   token: string;
   link: string;
+  adminLink: string;
   buyerEmail: string;
   buyerName: string | null;
   inputAddress: string;
   displayAddress: string;
   normalizedAddress: string;
+  siteContextJson: string | null;
+  siteContextGeneratedAt: Date | null;
   workbookCsv: string;
   previewRowCount: number;
   priceCents: number;
@@ -174,6 +196,9 @@ function createArchiveRow(args: {
     inputAddress: args.inputAddress,
     displayAddress: args.displayAddress,
     normalizedAddress: args.normalizedAddress,
+    siteContextJson: args.siteContextJson,
+    siteContextGeneratedAt: args.siteContextGeneratedAt,
+    adminLink: args.adminLink,
     workbookCsv: args.workbookCsv,
     previewRowCount: args.previewRowCount,
     priceCents: args.priceCents,
@@ -212,6 +237,7 @@ export async function processLiteSheet(args: {
   tenantId: string;
   request?: Request;
   maxRows?: number;
+  rowNumbers?: number[];
 }): Promise<LiteProcessSummary> {
   const adapter = await createLiteSheetAdapter();
   const config = getLiteConfig();
@@ -221,8 +247,12 @@ export async function processLiteSheet(args: {
   const archiveHeaderState = buildArchiveHeaderState(archiveValues, adapter.tabs.archiveTabName);
   const archiveTable = parseArchiveTable(archiveValues, adapter.tabs.archiveTabName);
   const lookups = createArchiveLookupMaps(archiveTable.rows);
+  const requestedRowNumbers = args.rowNumbers ? new Set(args.rowNumbers) : null;
+  const filteredRows = requestedRowNumbers
+    ? parsedIntake.rows.filter((row) => requestedRowNumbers.has(row.rowNumber))
+    : parsedIntake.rows;
   const candidates =
-    typeof args.maxRows === "number" ? parsedIntake.rows.slice(0, Math.max(0, args.maxRows)) : parsedIntake.rows;
+    typeof args.maxRows === "number" ? filteredRows.slice(0, Math.max(0, args.maxRows)) : filteredRows;
 
   let nextRowNumber = nextArchiveRowNumber(archiveValues);
   const updates = new Map<string, SheetCellUpdate>();
@@ -231,6 +261,9 @@ export async function processLiteSheet(args: {
     queueUpdate(updates, update);
   }
   for (const update of archiveHeaderState.headerUpdates) {
+    queueUpdate(updates, update);
+  }
+  for (const update of buildArchiveNormalizationUpdates(archiveValues, adapter.tabs.archiveTabName)) {
     queueUpdate(updates, update);
   }
 
@@ -251,16 +284,18 @@ export async function processLiteSheet(args: {
     const normalizedAddress = normalizeLiteAddress(inputAddress);
     const buyerEmail = normalizeBuyerEmail(row.buyerEmail);
     const buyerName = row.buyerName?.trim() || null;
+    const shouldForceRefresh = row.forceRegenerate || Boolean(row.siteContextHint || row.siteContextImageRefs.length);
     const buyerKey = `${args.tenantId}::${normalizedAddress}::${buyerEmail}`;
     const addressKey = `${args.tenantId}::${normalizedAddress}`;
 
     try {
-      if (row.link) {
+      if (row.link && !shouldForceRefresh) {
         const token = extractLiteTokenFromUrl(row.link);
         if (!token) {
           throw new Error("Existing link does not contain a valid `/r/{token}` URL.");
         }
         const canonicalLink = buildLiteLinkUrl(token, args.request);
+        const canonicalAdminLink = buildLiteAdminLinkUrl(token, args.request);
 
         const archived = lookups.byToken.get(token);
         if (archived) {
@@ -274,10 +309,11 @@ export async function processLiteSheet(args: {
             summary.updatedRows += 1;
           }
 
-          if (archived.link !== canonicalLink) {
+          if (archived.link !== canonicalLink || archived.adminLink !== canonicalAdminLink) {
             const updatedArchiveRow: LiteArchiveRow = {
               ...archived,
               link: canonicalLink,
+              adminLink: canonicalAdminLink,
               updatedAt: new Date(),
             };
             updateLookupMaps(updatedArchiveRow, lookups);
@@ -308,6 +344,8 @@ export async function processLiteSheet(args: {
         const workbookSource = lookups.byAddressKey.get(addressKey);
         const workbookCsv = workbookSource?.workbookCsv ?? "";
         const displayAddress = workbookSource?.displayAddress ?? inputAddress;
+        const siteContextJson = workbookSource?.siteContextJson ?? null;
+        const siteContextGeneratedAt = workbookSource?.siteContextGeneratedAt ?? null;
 
         if (workbookCsv) {
           summary.reusedWorkbooks += 1;
@@ -318,11 +356,14 @@ export async function processLiteSheet(args: {
           tenantId: args.tenantId,
           token,
           link: canonicalLink,
+          adminLink: canonicalAdminLink,
           buyerEmail,
           buyerName,
           inputAddress,
           displayAddress,
           normalizedAddress,
+          siteContextJson,
+          siteContextGeneratedAt,
           workbookCsv,
           previewRowCount: config.previewRowCount,
           priceCents: config.priceCents,
@@ -368,7 +409,7 @@ export async function processLiteSheet(args: {
         continue;
       }
 
-      const existingBuyerRow = lookups.byBuyerKey.get(buyerKey);
+      const existingBuyerRow = shouldForceRefresh ? null : lookups.byBuyerKey.get(buyerKey);
       if (existingBuyerRow) {
         queueUpdate(updates, {
           tabName: adapter.tabs.intakeTabName,
@@ -391,11 +432,23 @@ export async function processLiteSheet(args: {
       }
 
       let workbookSource = lookups.byAddressKey.get(addressKey);
-      let workbookCsv = workbookSource?.workbookCsv ?? "";
+      let workbookCsv = shouldForceRefresh ? "" : workbookSource?.workbookCsv ?? "";
       let displayAddress = workbookSource?.displayAddress ?? inputAddress;
+      const generatedSiteContextJson =
+        row.siteContextHint || row.siteContextImageRefs.length
+          ? await generateLiteSiteContext({
+              inputAddress,
+              siteContextHint: row.siteContextHint,
+              siteContextImageRefs: row.siteContextImageRefs,
+            })
+          : null;
+      const siteContextJson = generatedSiteContextJson ?? workbookSource?.siteContextJson ?? null;
+      const siteContextGeneratedAt = generatedSiteContextJson ? new Date() : workbookSource?.siteContextGeneratedAt ?? null;
 
       if (!workbookCsv) {
-        const generated = await generateLiteWorkbookFromAddress(inputAddress);
+        const generated = await generateLiteWorkbookFromAddress(inputAddress, {
+          siteContextJson,
+        });
         workbookCsv = generated.csv;
         displayAddress = generated.displayAddress;
         assertWorkbookCsvFits(workbookCsv);
@@ -406,16 +459,20 @@ export async function processLiteSheet(args: {
 
       const token = createLiteToken();
       const link = buildLiteLinkUrl(token, args.request);
+      const adminLink = buildLiteAdminLinkUrl(token, args.request);
       const archivedRow = createArchiveRow({
         rowNumber: nextRowNumber,
         tenantId: args.tenantId,
         token,
         link,
+        adminLink,
         buyerEmail,
         buyerName,
         inputAddress,
         displayAddress,
         normalizedAddress,
+        siteContextJson,
+        siteContextGeneratedAt,
         workbookCsv,
         previewRowCount: config.previewRowCount,
         priceCents: config.priceCents,

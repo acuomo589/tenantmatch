@@ -6,6 +6,7 @@ export interface AiConfig {
   openAiModel: string;
   listingParserModel: string;
   listingResearchModel: string;
+  siteContextModel: string;
   workbookModel: string;
   exploreOptionsModel: string;
   outreachEmailModel: string;
@@ -25,13 +26,14 @@ export function getAiConfig(): AiConfig {
     openAiModel: process.env.AI_ANALYSIS_MODEL ?? "gpt-4.1-mini",
     listingParserModel: process.env.AI_LISTING_PARSER_MODEL ?? "o3-mini",
     listingResearchModel: process.env.AI_LISTING_RESEARCH_MODEL ?? "gpt-5.4",
+    siteContextModel: process.env.AI_SITE_CONTEXT_MODEL ?? process.env.AI_LISTING_RESEARCH_MODEL ?? "gpt-5.4",
     workbookModel: process.env.AI_WORKBOOK_MODEL ?? "gpt-5.4",
     exploreOptionsModel: process.env.AI_EXPLORE_OPTIONS_MODEL ?? "gpt-5.4",
     outreachEmailModel: process.env.AI_OUTREACH_EMAIL_MODEL ?? "gpt-4o",
     vertexModel: process.env.VERTEX_ANALYSIS_MODEL ?? "gemini-2.0-flash",
     timeoutMs: Number(process.env.AI_TIMEOUT_MS ?? 30000),
     langsmithApiKey: process.env.LANGSMITH_API_KEY,
-    langsmithProject: process.env.LANGSMITH_PROJECT ?? "timpani-proto",
+    langsmithProject: process.env.LANGSMITH_PROJECT ?? "tenantmatch",
     langsmithTracingEnabled: process.env.LANGSMITH_TRACING === "true",
   };
 }

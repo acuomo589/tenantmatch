@@ -35,7 +35,9 @@ function WorkbookPanel({
         cell: ({ row }) => (
           <div className="grid gap-1">
             <span className="font-semibold text-foreground">{row.original.business_name}</span>
-            <span className="text-xs text-muted-foreground">{row.original.category}</span>
+            <span className="text-xs text-muted-foreground">
+              {row.original.category} · {row.original.property_type}
+            </span>
           </div>
         ),
       },
@@ -61,8 +63,13 @@ function WorkbookPanel({
       },
       {
         accessorKey: "fit_summary",
-        header: "Fit summary",
-        cell: ({ row }) => <span className="line-clamp-3 text-sm text-muted-foreground">{row.original.fit_summary}</span>,
+        header: "Fit & rationale",
+        cell: ({ row }) => (
+          <div className="grid gap-1 text-sm">
+            <span className="line-clamp-3 text-muted-foreground">{row.original.fit_summary}</span>
+            <span className="line-clamp-2 font-medium text-foreground/80">{row.original.rationale}</span>
+          </div>
+        ),
       },
       {
         id: "action",

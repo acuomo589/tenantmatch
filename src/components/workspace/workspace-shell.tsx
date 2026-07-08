@@ -39,7 +39,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
         <header className="sticky top-0 z-20 border-b border-border/80 bg-background/90 px-4 py-3 backdrop-blur lg:hidden">
           <div className="flex items-center justify-between gap-3">
             <div className="grid">
-              <span className="text-sm font-semibold tracking-tight">Timpani Lite</span>
+              <span className="text-sm font-semibold tracking-tight">TenantMatch</span>
               <span className="text-xs text-muted-foreground">Buyer link admin</span>
             </div>
             <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>

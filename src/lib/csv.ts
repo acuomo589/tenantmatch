@@ -3,10 +3,12 @@ import type { CandidateRow } from "@/lib/types";
 const REQUIRED_HEADERS = [
   "business_name",
   "category",
+  "property_type",
   "tenant_fit_score_100",
   "move_probability_1_10",
   "priority_rank",
   "fit_summary",
+  "rationale",
   "owner_contact_name",
 ] as const;
 
@@ -50,6 +52,20 @@ function score(row: CandidateRow): number {
   return row.tenant_fit_score_100 * 0.6 + row.move_probability_1_10 * 4;
 }
 
+function validateRationale(value: string, rowNumber: number): string {
+  const rationale = value.trim();
+
+  if (!rationale) {
+    throw new Error(`CSV row ${rowNumber} is missing required rationale.`);
+  }
+
+  if (rationale.length > 300) {
+    throw new Error(`CSV row ${rowNumber} rationale exceeds 300 characters.`);
+  }
+
+  return rationale;
+}
+
 export function parseAndNormalizeCsv(csv: string): CandidateRow[] {
   const lines = csv
     .split(/\r?\n/)
@@ -68,8 +84,9 @@ export function parseAndNormalizeCsv(csv: string): CandidateRow[] {
 
   const headerIndex = Object.fromEntries(headers.map((h, idx) => [h, idx]));
 
-  const rows: CandidateRow[] = lines.slice(1).map((line) => {
+  const rows: CandidateRow[] = lines.slice(1).map((line, index) => {
     const cols = splitCsvLine(line);
+    const rowNumber = index + 2;
 
     const fit = Number.parseInt(cols[headerIndex.tenant_fit_score_100] ?? "0", 10);
     const move = Number.parseInt(cols[headerIndex.move_probability_1_10] ?? "1", 10);
@@ -77,10 +94,12 @@ export function parseAndNormalizeCsv(csv: string): CandidateRow[] {
     return {
       business_name: (cols[headerIndex.business_name] ?? "").trim(),
       category: (cols[headerIndex.category] ?? "N/A").trim() || "N/A",
+      property_type: (cols[headerIndex.property_type] ?? "").trim() || "Mixed-use",
       tenant_fit_score_100: clamp(Number.isFinite(fit) ? fit : 0, 0, 100),
       move_probability_1_10: clamp(Number.isFinite(move) ? move : 1, 1, 10),
       priority_rank: 0,
       fit_summary: (cols[headerIndex.fit_summary] ?? "").trim().slice(0, 400),
+      rationale: validateRationale(cols[headerIndex.rationale] ?? "", rowNumber),
       owner_contact_name:
         (cols[headerIndex.owner_contact_name] ?? "N/A").trim() || "N/A",
     };
@@ -124,10 +143,12 @@ export function toCsv(rows: CandidateRow[]): string {
     [
       row.business_name,
       row.category,
+      row.property_type,
       row.tenant_fit_score_100,
       row.move_probability_1_10,
       row.priority_rank,
       row.fit_summary,
+      row.rationale,
       row.owner_contact_name,
     ]
       .map(escape)

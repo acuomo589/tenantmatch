@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { createLiteWorkbookPdf } from "@/lib/lite/pdf";
+import { buildLitePdfFilename } from "@/lib/lite/download";
 import { canDownloadLiteLink, getLiteLinkWithWorkbookByToken } from "@/lib/lite/service";
-
-function buildPdfFilename(address: string): string {
-  return `${address.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toLowerCase() || "workbook"}_timpani_lite.pdf`;
-}
 
 export async function GET(_: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -26,7 +23,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ token: str
   return new NextResponse(pdf, {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${buildPdfFilename(link.workbook.displayAddress)}"`,
+      "Content-Disposition": `attachment; filename="${buildLitePdfFilename(link.workbook.displayAddress)}"`,
     },
   });
 }

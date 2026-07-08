@@ -25,7 +25,7 @@ function AppSidebar({
         </div>
         {!collapsed ? (
           <div className="grid gap-0.5">
-            <span className="text-base font-semibold tracking-tight">Timpani Lite</span>
+            <span className="text-base font-semibold tracking-tight">TenantMatch</span>
             <span className="text-xs text-sidebar-foreground/70">Sheet-driven buyer links</span>
           </div>
         ) : null}

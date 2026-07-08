@@ -128,7 +128,8 @@ export type MockExploreOptionsAnalysis = {
   scenarios: MockExploreOptionsScenario[];
 };
 
-export const MOCK_AGENTIC_FLOW_ENV = "TIMPANI_MOCK_AGENTIC_FLOW";
+export const MOCK_AGENTIC_FLOW_ENV = "TENANTMATCH_MOCK_AGENTIC_FLOW";
+export const LEGACY_MOCK_AGENTIC_FLOW_ENV = "TIMPANI_MOCK_AGENTIC_FLOW";
 
 export const MOCK_LISTING_ADDRESS = "875 Taylor Station Rd, Gahanna, OH 43230";
 export const MOCK_LISTING_DETAILS_INPUT = `875 Taylor Station Rd, Gahanna, OH 43230
@@ -380,6 +381,7 @@ const MOCK_WORKBOOK_NAMES = [
 export const MOCK_WORKBOOK_ROWS: WorkbookRow[] = MOCK_WORKBOOK_NAMES.map((businessName, index) => ({
   business_name: businessName,
   category: index % 3 === 0 ? "Service logistics" : index % 3 === 1 ? "Food production" : "Industrial supply",
+  property_type: "Industrial",
   city: index % 2 === 0 ? "Columbus" : "Gahanna",
   state: "OH",
   distance_miles: Number((3.2 + index * 0.8).toFixed(1)),
@@ -388,13 +390,15 @@ export const MOCK_WORKBOOK_ROWS: WorkbookRow[] = MOCK_WORKBOOK_NAMES.map((busine
   priority_rank: index + 1,
   fit_summary:
     "Operationally aligned with the building's access, power profile, and flexible bay depth, with enough scale to justify targeted tenant improvements.",
+  rationale:
+    "Clear height, dock access, and power profile fit industrial throughput; regional freeway access supports logistics economics.",
   owner_contact_name: `${["Dana", "Morgan", "Taylor", "Jordan"][index % 4]} ${["Reed", "Parker", "Shaw", "Mills", "Flynn"][index % 5]}`,
 }));
 
 export const MOCK_WORKBOOK_CSV = buildWorkbookCsv(MOCK_WORKBOOK_ROWS);
 
 export function isMockAgenticFlowEnabled(): boolean {
-  const enabled = process.env[MOCK_AGENTIC_FLOW_ENV] === "1";
+  const enabled = process.env[MOCK_AGENTIC_FLOW_ENV] === "1" || process.env[LEGACY_MOCK_AGENTIC_FLOW_ENV] === "1";
 
   if (enabled && process.env.NODE_ENV === "production") {
     throw new Error(`${MOCK_AGENTIC_FLOW_ENV} cannot be enabled in production.`);
@@ -407,6 +411,7 @@ function buildWorkbookCsv(rows: WorkbookRow[]): string {
   const headers = [
     "business_name",
     "category",
+    "property_type",
     "city",
     "state",
     "distance_miles",
@@ -414,6 +419,7 @@ function buildWorkbookCsv(rows: WorkbookRow[]): string {
     "move_probability_1_10",
     "priority_rank",
     "fit_summary",
+    "rationale",
     "owner_contact_name",
   ];
 
@@ -421,6 +427,7 @@ function buildWorkbookCsv(rows: WorkbookRow[]): string {
     [
       row.business_name,
       row.category,
+      row.property_type,
       row.city,
       row.state,
       row.distance_miles,
@@ -428,6 +435,7 @@ function buildWorkbookCsv(rows: WorkbookRow[]): string {
       row.move_probability_1_10,
       row.priority_rank,
       row.fit_summary,
+      row.rationale,
       row.owner_contact_name,
     ]
       .map(escapeCsvCell)

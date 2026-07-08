@@ -27,10 +27,12 @@ export interface ListingIntake {
 export interface CandidateRow {
   business_name: string;
   category: string;
+  property_type: string;
   tenant_fit_score_100: number;
   move_probability_1_10: number;
   priority_rank: number;
   fit_summary: string;
+  rationale: string;
   owner_contact_name: string;
   priority_score?: number;
 }

@@ -1,6 +1,6 @@
-# Timpani End-to-End Context For A New Codex Agent
+# TenantMatch End-to-End Context For A New Codex Agent
 
-This document is the current-state handoff for the Timpani product flow as implemented in the repo today.
+This document is the current-state handoff for the TenantMatch product flow as implemented in the repo today.
 
 It is written for a new Codex agent that needs to understand:
 
@@ -15,7 +15,7 @@ If this document conflicts with the UI copy, treat the code as source of truth.
 
 ## 1. Product Summary
 
-Timpani is a lean commercial real estate workflow app that lets a user:
+TenantMatch is a lean commercial real estate workflow app that lets a user:
 
 1. add a listing
 2. auto-research the market for that listing
@@ -469,7 +469,7 @@ Contact behavior:
 
 One recommended contact rule:
 
-- operationally, Timpani works with one selected contact at a time
+- operationally, TenantMatch works with one selected contact at a time
 - canonical recommended contact is:
   - `contacts.find(c => c.id === selectedContactId)`
   - fallback to `contacts[0]`
@@ -1178,7 +1178,7 @@ Gap 4:
 
 ## 10. Recommended Canonical Contract For The Next Codex Agent
 
-If you are the next agent extending Timpani, use these rules:
+If you are the next agent extending TenantMatch, use these rules:
 
 1. Treat the listing-detail flow as the primary product path:
    - intake

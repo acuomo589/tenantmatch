@@ -1,4 +1,4 @@
--- Simplify Timpani Lite to the address/workbook/link data model.
+-- Simplify TenantMatch to the address/workbook/link data model.
 -- Keep:
 --   app_users, tenants, tenant_memberships, plans, tenant_subscriptions,
 --   usage_counters, workspace_states, lite_workbooks, lite_links
