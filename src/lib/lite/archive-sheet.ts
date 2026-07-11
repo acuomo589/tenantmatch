@@ -358,6 +358,7 @@ export function toLiteLinkWithWorkbook(
       : parseWorkbookCsv(row.workbookCsv, {
           allowLegacyRationale: true,
           allowLegacyPropertyType: true,
+          allowLegacyType: true,
         });
 
   const workbook: LiteWorkbookRecord = {

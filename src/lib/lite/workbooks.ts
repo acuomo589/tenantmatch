@@ -37,6 +37,7 @@ function buildWorkbookCsv(rows: WorkbookRow[]): string {
     "business_name",
     "category",
     "property_type",
+    "type",
     "city",
     "state",
     "distance_miles",
@@ -55,6 +56,7 @@ function buildWorkbookCsv(rows: WorkbookRow[]): string {
         row.business_name,
         row.category,
         row.property_type,
+        row.type,
         row.city,
         row.state,
         row.distance_miles,
@@ -79,13 +81,17 @@ function buildMockLiteWorkbookRows(): WorkbookRow[] {
       business_name: EXTRA_MOCK_NAMES[index - MOCK_WORKBOOK_ROWS.length] ?? `Prospect ${index + 1}`,
       category: index % 2 === 0 ? "Service logistics" : "Industrial supply",
       property_type: "Industrial",
+      type: index < 10 ? "Signal" : "Fit",
       city: index % 3 === 0 ? "Columbus" : "Gahanna",
       state: "OH",
       distance_miles: Number((4.5 + index * 0.7).toFixed(1)),
       tenant_fit_score_100: Math.max(68, 92 - index),
-      move_probability_1_10: Math.max(4, 9 - Math.floor(index / 4)),
+      move_probability_1_10: index < 10 ? Math.max(5, 9 - Math.floor(index / 4)) : Math.max(1, 3 - Math.floor((index - 10) / 5)),
       priority_rank: index + 1,
-      fit_summary: "Operationally aligned with the building's access, loading profile, and flexible bay depth.",
+      fit_summary:
+        index < 10
+          ? "Expansion signal found — operationally aligned with the building's access, loading profile, and flexible bay depth."
+          : "No current move signal — operationally aligned with the building's access, loading profile, and flexible bay depth.",
       rationale: "Clear height and loading fit light industrial users; regional highway access supports distribution economics.",
       owner_contact_name: `Contact ${index + 1}`,
     });
@@ -166,14 +172,23 @@ async function repairWorkbookCsv(args: {
   csvCandidate: string;
   parseError: string;
 }): Promise<string | undefined> {
-  const propertyTypeFixInstructions = args.parseError.toLowerCase().includes("property_type")
+  const normalizedParseError = args.parseError.toLowerCase();
+  const propertyTypeFixInstructions = normalizedParseError.includes("property_type")
     ? [
-        "Every row MUST include `property_type` immediately after `category` and before `city`.",
+        "Every row MUST include `property_type` immediately after `category` and before `type`.",
         "Use one exact listing type per row: Industrial, Retail / Restaurant, Office, Medical, or Mixed-use.",
         "Repeat the inferred listing type consistently across all rows for the same workbook unless the property is truly mixed-use.",
       ]
     : [];
-  const rationaleFixInstructions = args.parseError.toLowerCase().includes("rationale")
+  const typeFixInstructions = normalizedParseError.includes("type")
+    ? [
+        "Every row MUST include `type` immediately after `property_type` and before `city`.",
+        "Use exactly `Signal` or `Fit`.",
+        "Use `Signal` only when a current market or move signal was actually found.",
+        "Use `Fit` when the candidate is a real fit-based suggestion with no current move signal found.",
+      ]
+    : [];
+  const rationaleFixInstructions = normalizedParseError.includes("rationale")
     ? [
         "Every row MUST include `rationale` immediately after `fit_summary` and before `owner_contact_name`.",
         "Each rationale must be <=300 chars and cite a concrete property-fit signal.",
@@ -194,6 +209,7 @@ async function repairWorkbookCsv(args: {
       `Return ONLY valid CSV with exactly ${LITE_WORKBOOK_ROW_COUNT} data rows.`,
       "Preserve the same overall prospect intent while fixing formatting and row count.",
       ...propertyTypeFixInstructions,
+      ...typeFixInstructions,
       ...rationaleFixInstructions,
     ].join("\n"),
     userContent: [

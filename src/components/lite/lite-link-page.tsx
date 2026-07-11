@@ -104,6 +104,7 @@ export function LiteLinkPage(args: {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Rank</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Business</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Type</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Location</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Fit</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Summary / rationale</th>
@@ -121,6 +122,7 @@ export function LiteLinkPage(args: {
                           </div>
                         </div>
                       </td>
+                      <td className="px-4 py-4">{row.type}</td>
                       <td className="px-4 py-4">
                         {row.city}, {row.state}
                       </td>

@@ -2,6 +2,7 @@ export interface WorkbookRow {
   business_name: string;
   category: string;
   property_type: string;
+  type: "Signal" | "Fit";
   city: string;
   state: string;
   distance_miles: number;
@@ -17,6 +18,7 @@ const REQUIRED_HEADERS = [
   "business_name",
   "category",
   "property_type",
+  "type",
   "city",
   "state",
   "distance_miles",
@@ -101,6 +103,28 @@ function buildLegacyPropertyType(category: string, fitSummary: string, rationale
   return "Mixed-use";
 }
 
+function inferLegacyProspectType(moveProbability: number, fitSummary: string): "Signal" | "Fit" {
+  if (/^no current move signal\b/i.test(fitSummary.trim())) {
+    return "Fit";
+  }
+
+  return moveProbability <= 3 ? "Fit" : "Signal";
+}
+
+function validateProspectType(value: string | undefined, rowNumber: number): "Signal" | "Fit" {
+  const normalized = (value ?? "").trim().toLowerCase();
+
+  if (normalized === "signal" || normalized === "signal-backed") {
+    return "Signal";
+  }
+
+  if (normalized === "fit" || normalized === "fit-only") {
+    return "Fit";
+  }
+
+  throw new Error(`Workbook row ${rowNumber} must set type to Signal or Fit.`);
+}
+
 function validateRationale(value: string, rowNumber: number): string {
   const rationale = value.trim();
 
@@ -129,6 +153,7 @@ export function parseWorkbookCsv(
   options?: {
     allowLegacyRationale?: boolean;
     allowLegacyPropertyType?: boolean;
+    allowLegacyType?: boolean;
   },
 ): WorkbookRow[] {
   const lines = csv
@@ -148,6 +173,9 @@ export function parseWorkbookCsv(
   }
   if (options?.allowLegacyPropertyType) {
     allowedLegacyHeaders.add("property_type");
+  }
+  if (options?.allowLegacyType) {
+    allowedLegacyHeaders.add("type");
   }
 
   const disallowedMissingHeaders = missingHeaders.filter((header) => !allowedLegacyHeaders.has(header));
@@ -173,6 +201,13 @@ export function parseWorkbookCsv(
                 cols[headerIndex.category] ?? "",
                 cols[headerIndex.fit_summary] ?? "",
                 cols[headerIndex.rationale] ?? "",
+              ),
+        type:
+          typeof headerIndex.type === "number"
+            ? validateProspectType(cols[headerIndex.type], rowNumber)
+            : inferLegacyProspectType(
+                clamp(parseLooseNumber(cols[headerIndex.move_probability_1_10], 1), 1, 10),
+                cols[headerIndex.fit_summary] ?? "",
               ),
         city: (cols[headerIndex.city] ?? "").trim(),
         state: (cols[headerIndex.state] ?? "").trim(),

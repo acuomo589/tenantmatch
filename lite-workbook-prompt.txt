@@ -259,6 +259,7 @@ Output ONLY CSV. Fields in exact order:
 business_name
 category
 property_type (repeat the STEP 1 inferred listing type for this row: Industrial, Retail / Restaurant, Office, Medical, or Mixed-use)
+type (Signal when you found a documented current market or move signal; Fit when no current move signal was found)
 city
 state
 distance_miles (reference only — NOT a ranking input; for Tier 2 a farther existing location is neutral-to-positive)

@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "discovery": "node --import tsx scripts/run-lite-discovery.ts",
     "test:contracts": "node --import tsx --test tests/contracts/**/*.test.ts",
     "test:e2e": "playwright test"
   },

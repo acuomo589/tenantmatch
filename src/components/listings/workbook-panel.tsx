@@ -47,6 +47,11 @@ function WorkbookPanel({
         cell: ({ row }) => `${row.original.city}, ${row.original.state}`,
       },
       {
+        accessorKey: "type",
+        header: "Type",
+        cell: ({ row }) => row.original.type,
+      },
+      {
         accessorKey: "distance_miles",
         header: "Miles",
         cell: ({ row }) => `${row.original.distance_miles} mi`,

@@ -161,6 +161,7 @@ Fields (in exact order):
 business_name
 category
 property_type (repeat the STEP 1 inferred listing type for this row)
+type (Signal when you found a documented current market or move signal; Fit when no current move signal was found)
 city
 state
 distance_miles

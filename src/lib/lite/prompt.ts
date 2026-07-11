@@ -8,7 +8,10 @@ const DEFAULT_LITE_WORKBOOK_PROMPT = `You are a commercial real estate tenant ma
 Your job is to take a property address, determine its type, and return a ranked list of real businesses that are strong leasing candidates.
 
 Return exactly ${LITE_WORKBOOK_ROW_COUNT} data rows as CSV with this exact field order:
-business_name,category,property_type,city,state,distance_miles,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,rationale,owner_contact_name
+business_name,category,property_type,type,city,state,distance_miles,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,rationale,owner_contact_name
+
+Use "type=Signal" when you found a documented current market or move signal.
+Use "type=Fit" when the candidate is a fit-based suggestion with no current move signal found.
 
 Do not wrap the CSV in markdown fences or commentary.`;
 

@@ -233,13 +233,56 @@ type CandidateValidationResult =
   | { candidate: Awaited<ReturnType<typeof validateLiteDiscoveredCandidate>>; error: null }
   | { candidate: null; error: string };
 
+export type LiteDiscoveryRunLogEvent = {
+  stage:
+    | "setup"
+    | "target"
+    | "backlog"
+    | "discover"
+    | "validate"
+    | "promote"
+    | "process"
+    | "finalize"
+    | "outreach"
+    | "sheet"
+    | "complete";
+  message: string;
+  data?: Record<string, unknown>;
+  timestamp: Date;
+};
+
+export type LiteDiscoveryLogger = (event: LiteDiscoveryRunLogEvent) => void;
+
+function emitLog(
+  logger: LiteDiscoveryLogger | undefined,
+  stage: LiteDiscoveryRunLogEvent["stage"],
+  message: string,
+  data?: Record<string, unknown>,
+): void {
+  logger?.({
+    stage,
+    message,
+    data,
+    timestamp: new Date(),
+  });
+}
+
 export async function runLiteZipDiscovery(args: {
   tenantId: string;
   request?: Request;
+  zipOverride?: string;
+  dailyLimitOverride?: number;
+  logger?: LiteDiscoveryLogger;
 }): Promise<LiteDiscoveryRunSummary> {
+  emitLog(args.logger, "setup", "Starting TenantMatch discovery run.");
   const adapter = await createLiteSheetAdapter();
   const config = getLiteConfig();
 
+  emitLog(args.logger, "setup", "Ensuring workflow tabs exist.", {
+    intakeTabName: adapter.tabs.intakeTabName,
+    archiveTabName: adapter.tabs.archiveTabName,
+    zipTargetsTabName: config.zipTargetsTabName,
+  });
   await adapter.ensureTabs([
     config.zipTargetsTabName,
     config.discoveredListingsTabName,
@@ -248,6 +291,7 @@ export async function runLiteZipDiscovery(args: {
     config.automationRunsTabName,
   ]);
 
+  emitLog(args.logger, "setup", "Reading workflow sheet tabs.");
   const [
     intakeValues,
     archiveValues,
@@ -287,8 +331,54 @@ export async function runLiteZipDiscovery(args: {
     queueUpdate(updates, update);
   }
 
-  const { selected, resetRows } = selectZipTarget(zipTargetTable.rows);
+  const forcedZip = args.zipOverride?.trim();
+  let selected: ZipTargetRow | null;
+  let resetRows: ZipTargetRow[];
+
+  if (forcedZip) {
+    const existingTarget = zipTargetTable.rows.find((row) => row.zip === forcedZip);
+    selected = {
+      rowNumber: existingTarget?.rowNumber ?? nextSheetRowNumber(zipTargetValues),
+      zip: forcedZip,
+      active: true,
+      sequence: existingTarget?.sequence ?? 0,
+      status: "IN_PROGRESS",
+      propertyTypes: existingTarget?.propertyTypes.length ? existingTarget.propertyTypes : [...LAUNCH_PROPERTY_TYPES],
+      dailyLimit: args.dailyLimitOverride ?? existingTarget?.dailyLimit ?? config.discoveryDailyLimit,
+      lastRunAt: existingTarget?.lastRunAt ?? null,
+      lastQualifiedCount: existingTarget?.lastQualifiedCount ?? null,
+      completedAt: null,
+      notes: "Manual CLI run.",
+    };
+    resetRows = [];
+
+    if (!existingTarget) {
+      zipTargetTable.rows.push(selected);
+    }
+
+    for (const update of buildZipTargetRowUpdates(
+      config.zipTargetsTabName,
+      selected.rowNumber,
+      zipTargetHeaderState.headerIndex,
+      selected,
+    )) {
+      queueUpdate(updates, update);
+    }
+  } else {
+    const selectedTarget = selectZipTarget(zipTargetTable.rows);
+    selected = selectedTarget.selected;
+    resetRows = selectedTarget.resetRows;
+
+    if (selected && args.dailyLimitOverride) {
+      selected = {
+        ...selected,
+        dailyLimit: args.dailyLimitOverride,
+      };
+    }
+  }
+
   if (!selected) {
+    emitLog(args.logger, "target", "No active ZIP targets found.");
     return {
       zip: "",
       candidateCount: 0,
@@ -312,6 +402,13 @@ export async function runLiteZipDiscovery(args: {
     }
   }
 
+  emitLog(args.logger, "target", "Selected ZIP target.", {
+    zip: selected.zip,
+    dailyLimit: selected.dailyLimit,
+    propertyTypes: selected.propertyTypes,
+    forced: Boolean(forcedZip),
+  });
+
   const summary: LiteDiscoveryRunSummary = {
     zip: selected.zip,
     candidateCount: 0,
@@ -333,6 +430,11 @@ export async function runLiteZipDiscovery(args: {
     .slice(0, promotionLimit);
 
   const rowsToPromote: DiscoveredListingRow[] = [...backlogRows];
+  emitLog(args.logger, "backlog", "Checked existing discovery backlog.", {
+    qualifiedBacklogCount: backlogRows.length,
+    promotedBacklogCount: promotedBacklogRows.length,
+    promotionLimit,
+  });
   if (backlogRows.length) {
     summary.notes.push(`Using ${backlogRows.length} backlog discovery row(s).`);
   }
@@ -368,11 +470,18 @@ export async function runLiteZipDiscovery(args: {
       LAUNCH_PROPERTY_TYPES.includes(value as (typeof LAUNCH_PROPERTY_TYPES)[number]),
     ) as Array<"Retail" | "Industrial">;
 
+    emitLog(args.logger, "discover", "Running public web listing discovery.", {
+      zip: selected.zip,
+      propertyTypes,
+    });
     const candidates = await discoverLiteZipCandidates({
       zip: selected.zip,
       propertyTypes,
     });
     summary.candidateCount = candidates.length;
+    emitLog(args.logger, "discover", "Discovery candidate pass complete.", {
+      candidateCount: candidates.length,
+    });
 
     const rankedCandidates = rankLiteDiscoveryCandidates(candidates);
     const validationCap = Math.min(rankedCandidates.length, config.discoveryMaxValidationsPerRun);
@@ -390,10 +499,19 @@ export async function runLiteZipDiscovery(args: {
     for (let index = 0; index < candidatesToValidate.length; index += validationConcurrency) {
       if (rowsToPromote.length >= promotionLimit) {
         summary.notes.push(`Stopped validation after reaching the daily promotion limit of ${promotionLimit}.`);
+        emitLog(args.logger, "validate", "Stopped validation after reaching promotion limit.", {
+          promotionLimit,
+          rowsToPromote: rowsToPromote.length,
+        });
         break;
       }
 
       const batch = candidatesToValidate.slice(index, index + validationConcurrency);
+      emitLog(args.logger, "validate", "Validating discovered listing batch.", {
+        batchStart: index + 1,
+        batchSize: batch.length,
+        validationCap,
+      });
       const validationResults = await Promise.all(
         batch.map(async (candidate): Promise<CandidateValidationResult> => {
           try {
@@ -418,6 +536,9 @@ export async function runLiteZipDiscovery(args: {
         if (result.error || !result.candidate) {
           summary.errorCount += 1;
           summary.notes.push(result.error || "Unexpected discovery validation failure.");
+          emitLog(args.logger, "validate", "Validation failed.", {
+            error: result.error || "Unexpected discovery validation failure.",
+          });
           continue;
         }
 
@@ -425,6 +546,13 @@ export async function runLiteZipDiscovery(args: {
 
         let row: DiscoveredListingRow;
         if (!validated.isListingPage || !validated.isActive) {
+          emitLog(args.logger, "validate", "Skipped stale or indirect listing.", {
+            title: validated.listingTitle,
+            address: validated.listingAddress,
+            sourceUrl: validated.sourceUrl,
+            isListingPage: validated.isListingPage,
+            isActive: validated.isActive,
+          });
           row = createDiscoveredListingRow({
             rowNumber: nextDiscoveredRowNumber,
             zip: selected.zip,
@@ -433,6 +561,11 @@ export async function runLiteZipDiscovery(args: {
             skipReason: validated.notes || "Listing appears stale or not a direct listing page.",
           });
         } else if (!LAUNCH_PROPERTY_TYPES.includes(validated.propertyType as (typeof LAUNCH_PROPERTY_TYPES)[number])) {
+          emitLog(args.logger, "validate", "Skipped out-of-scope property type.", {
+            title: validated.listingTitle,
+            address: validated.listingAddress,
+            propertyType: validated.propertyType,
+          });
           row = createDiscoveredListingRow({
             rowNumber: nextDiscoveredRowNumber,
             zip: selected.zip,
@@ -441,6 +574,12 @@ export async function runLiteZipDiscovery(args: {
             skipReason: `Resolved property type ${validated.propertyType} is out of launch scope.`,
           });
         } else if (!hasTrustedLiteBrokerEmail(validated)) {
+          emitLog(args.logger, "validate", "Skipped listing without trusted broker email.", {
+            title: validated.listingTitle,
+            address: validated.listingAddress,
+            sourceUrl: validated.sourceUrl,
+            listingContactNames: validated.listingContactNames,
+          });
           row = createDiscoveredListingRow({
             rowNumber: nextDiscoveredRowNumber,
             zip: selected.zip,
@@ -491,9 +630,25 @@ export async function runLiteZipDiscovery(args: {
                 }),
               );
               summary.qualifiedCount += 1;
+              emitLog(args.logger, "validate", "Qualified broker/listing pair.", {
+                title: validated.listingTitle,
+                address: validated.listingAddress,
+                propertyType: validated.propertyType,
+                brokerName: contact.name,
+                brokerEmail: contact.email,
+                emailSourceType: contact.emailSourceType,
+                sourceUrl: validated.sourceUrl,
+              });
               if (rowsToPromote.length < promotionLimit) {
                 rowsToPromote.push(nextRow);
               }
+            } else {
+              emitLog(args.logger, "validate", "Skipped duplicate broker/listing pair.", {
+                title: validated.listingTitle,
+                address: validated.listingAddress,
+                brokerName: contact.name,
+                brokerEmail: contact.email,
+              });
             }
           }
 
@@ -528,6 +683,7 @@ export async function runLiteZipDiscovery(args: {
   }
 
   if (!rowsToPromote.length && !promotedBacklogRows.length) {
+    emitLog(args.logger, "promote", "No qualified listings available to promote.");
     const zipTargetNext: ZipTargetRow = {
       ...selected,
       lastRunAt: new Date(),
@@ -569,6 +725,13 @@ export async function runLiteZipDiscovery(args: {
     }
 
     await adapter.writeValues(Array.from(updates.values()));
+    emitLog(args.logger, "sheet", "Wrote no-qualified run state to sheet.", {
+      updateCount: updates.size,
+    });
+    emitLog(args.logger, "complete", "Discovery run complete.", {
+      ...summary,
+      status: "NO_QUALIFIED_LISTINGS",
+    });
     return summary;
   }
 
@@ -583,6 +746,14 @@ export async function runLiteZipDiscovery(args: {
   }
 
   for (const discoveredRow of rowsToPromote.slice(0, promotionLimit)) {
+    emitLog(args.logger, "promote", "Promoting qualified listing to intake row.", {
+      address: discoveredRow.listingAddress,
+      brokerName: discoveredRow.brokerName,
+      brokerEmail: discoveredRow.brokerEmail,
+      propertyType: discoveredRow.propertyType,
+      sourceUrl: discoveredRow.sourceUrl,
+      intakeRowNumber: nextIntakeRowNumber,
+    });
     const intakeEntry: LiteIntakeEntry = {
       brokerName: discoveredRow.brokerName,
       email: discoveredRow.brokerEmail || "",
@@ -627,10 +798,21 @@ export async function runLiteZipDiscovery(args: {
   }
 
   await adapter.writeValues(Array.from(updates.values()));
-  await processLiteSheet({
+  emitLog(args.logger, "sheet", "Wrote promotion rows to sheet.", {
+    updateCount: updates.size,
+    promotedRowNumbers: Array.from(promotedRowNumbers),
+  });
+  emitLog(args.logger, "process", "Processing promoted intake rows into workbook links.", {
+    rowNumbers: Array.from(promotedRowNumbers),
+  });
+  const processSummary = await processLiteSheet({
     tenantId: args.tenantId,
     request: args.request,
     rowNumbers: Array.from(promotedRowNumbers),
+  });
+  emitLog(args.logger, "process", "Workbook processing complete.", {
+    ...processSummary,
+    errors: processSummary.errors.map((error) => `${error.rowNumber}: ${error.message}`),
   });
 
   const refreshedIntakeValues = await adapter.readValues(adapter.tabs.intakeTabName);
@@ -659,6 +841,11 @@ export async function runLiteZipDiscovery(args: {
         error: intakeRow.error || "Workbook processing did not produce a valid link.",
       };
       summary.errorCount += 1;
+      emitLog(args.logger, "finalize", "Promoted row failed to produce a link.", {
+        address: discoveredRow.listingAddress,
+        intakeRowNumber: discoveredRow.intakeRowNumber,
+        error: finalizedRow.error,
+      });
     } else {
       finalizedRow = {
         ...discoveredRow,
@@ -669,6 +856,14 @@ export async function runLiteZipDiscovery(args: {
         error: null,
       };
       summary.processedCount += 1;
+      emitLog(args.logger, "finalize", "Workbook link ready.", {
+        address: finalizedRow.listingAddress,
+        brokerName: finalizedRow.brokerName,
+        brokerEmail: finalizedRow.brokerEmail,
+        token,
+        paywallLink: intakeRow.link,
+        adminLink: buildLiteAdminLinkUrl(token, args.request),
+      });
       successfulPromotions.push({
         ...finalizedRow,
         paywallLink: intakeRow.link,
@@ -744,6 +939,15 @@ export async function runLiteZipDiscovery(args: {
     queueTokens.add(queueRow.token);
     nextQueueRowNumber += 1;
     summary.draftCount += 1;
+    emitLog(args.logger, "outreach", "Queued broker outreach draft.", {
+      address: queueRow.listingAddress,
+      brokerName: queueRow.brokerName,
+      brokerEmail: queueRow.brokerEmail,
+      subject: queueRow.subject,
+      approvalStatus: queueRow.approvalStatus,
+      sendStatus: queueRow.sendStatus,
+      error: queueRow.error,
+    });
   }
 
   const zipTargetNext: ZipTargetRow = {
@@ -788,5 +992,12 @@ export async function runLiteZipDiscovery(args: {
   }
 
   await adapter.writeValues(Array.from(finalUpdates.values()));
+  emitLog(args.logger, "sheet", "Wrote final discovery, qualified-listing, run-log, and outreach state to sheet.", {
+    updateCount: finalUpdates.size,
+  });
+  emitLog(args.logger, "complete", "Discovery run complete.", {
+    ...summary,
+    status: "OK",
+  });
   return summary;
 }

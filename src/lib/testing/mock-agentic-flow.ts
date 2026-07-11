@@ -382,14 +382,17 @@ export const MOCK_WORKBOOK_ROWS: WorkbookRow[] = MOCK_WORKBOOK_NAMES.map((busine
   business_name: businessName,
   category: index % 3 === 0 ? "Service logistics" : index % 3 === 1 ? "Food production" : "Industrial supply",
   property_type: "Industrial",
+  type: index < 10 ? "Signal" : "Fit",
   city: index % 2 === 0 ? "Columbus" : "Gahanna",
   state: "OH",
   distance_miles: Number((3.2 + index * 0.8).toFixed(1)),
   tenant_fit_score_100: 92 - index,
-  move_probability_1_10: Math.max(4, 10 - Math.floor(index / 3)),
+  move_probability_1_10: index < 10 ? Math.max(5, 10 - Math.floor(index / 3)) : Math.max(1, 3 - Math.floor((index - 10) / 5)),
   priority_rank: index + 1,
   fit_summary:
-    "Operationally aligned with the building's access, power profile, and flexible bay depth, with enough scale to justify targeted tenant improvements.",
+    index < 10
+      ? "Expansion signal found — operationally aligned with the building's access, power profile, and flexible bay depth, with enough scale to justify targeted tenant improvements."
+      : "No current move signal — operationally aligned with the building's access, power profile, and flexible bay depth, with enough scale to justify targeted tenant improvements.",
   rationale:
     "Clear height, dock access, and power profile fit industrial throughput; regional freeway access supports logistics economics.",
   owner_contact_name: `${["Dana", "Morgan", "Taylor", "Jordan"][index % 4]} ${["Reed", "Parker", "Shaw", "Mills", "Flynn"][index % 5]}`,
@@ -412,6 +415,7 @@ function buildWorkbookCsv(rows: WorkbookRow[]): string {
     "business_name",
     "category",
     "property_type",
+    "type",
     "city",
     "state",
     "distance_miles",
@@ -428,6 +432,7 @@ function buildWorkbookCsv(rows: WorkbookRow[]): string {
       row.business_name,
       row.category,
       row.property_type,
+      row.type,
       row.city,
       row.state,
       row.distance_miles,

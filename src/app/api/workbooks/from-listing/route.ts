@@ -47,8 +47,9 @@ async function loadWorkbookPrompt(): Promise<string> {
   if (!trimmed) {
       return [
         "Return ONLY CSV with this exact header order:",
-        "business_name,category,property_type,city,state,distance_miles,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,rationale,owner_contact_name",
+        "business_name,category,property_type,type,city,state,distance_miles,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,rationale,owner_contact_name",
         "Generate 20 rows with realistic tenant prospects based on the listing context.",
+        "Set type to Signal for signal-backed rows and Fit for fit-only rows with no current move signal.",
         "Do not wrap in markdown fences.",
       ].join("\n");
   }
@@ -113,12 +114,36 @@ async function repairWorkbookCsv(args: {
   csvCandidate: string;
   parseError: string;
 }): Promise<string | undefined> {
+  const normalizedParseError = args.parseError.toLowerCase();
+  const propertyTypeFixInstructions = normalizedParseError.includes("property_type")
+    ? [
+        "Every row MUST include `property_type` immediately after `category` and before `type`.",
+        "Use one exact listing type per row: Industrial, Retail / Restaurant, Office, Medical, or Mixed-use.",
+      ]
+    : [];
+  const typeFixInstructions = normalizedParseError.includes("type")
+    ? [
+        "Every row MUST include `type` immediately after `property_type` and before `city`.",
+        "Use exactly `Signal` or `Fit`.",
+        "Use `Signal` only when a current market or move signal was actually found.",
+        "Use `Fit` for fit-based suggestions with no current move signal found.",
+      ]
+    : [];
+  const rationaleFixInstructions = normalizedParseError.includes("rationale")
+    ? [
+        "Every row MUST include `rationale` immediately after `fit_summary` and before `owner_contact_name`.",
+        "Each rationale must be <=300 chars and cite a concrete property-fit signal.",
+      ]
+    : [];
   const repairPrompt = [
     args.workbookPrompt,
     "",
     "You are now in CSV repair mode.",
     "Fix only CSV formatting/schema issues while preserving the original tenant intent.",
     "Return ONLY CSV, with the exact required headers and valid CSV escaping.",
+    ...propertyTypeFixInstructions,
+    ...typeFixInstructions,
+    ...rationaleFixInstructions,
     "Do not add commentary.",
   ].join("\n");
 

@@ -25,7 +25,7 @@ test("lite workbook generation returns exactly 25 rows in mock mode", async () =
   assert.equal(workbook.rows[24]?.priority_rank, 25);
   assert.equal(
     workbook.csv.split(/\r?\n/, 1)[0],
-    "business_name,category,property_type,city,state,distance_miles,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,rationale,owner_contact_name",
+    "business_name,category,property_type,type,city,state,distance_miles,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,rationale,owner_contact_name",
   );
   for (const row of workbook.rows) {
     assert.ok(row.property_type.length > 0);
@@ -76,7 +76,7 @@ test("sheet processing creates one workbook, reuses duplicate buyer rows, and is
   assert.ok(workbookCsvIndex >= 0);
   assert.ok(workbookCsvDataIndex >= 0);
   assert.match(snapshot["TenantMatch Links"]?.[1]?.[workbookCsvIndex] ?? "", /^http:\/\/localhost:3000\/a\/[^?]+\?sig=/);
-  assert.match(snapshot["TenantMatch Links"]?.[1]?.[workbookCsvDataIndex] ?? "", /^business_name,category,property_type,city,state,/);
+  assert.match(snapshot["TenantMatch Links"]?.[1]?.[workbookCsvDataIndex] ?? "", /^business_name,category,property_type,type,city,state,/);
 
   const secondResponse = await POST(new Request("http://localhost/api/lite/sheets/process", { method: "POST" }));
   assert.equal(secondResponse.status, 200);
@@ -141,7 +141,7 @@ test("sheet processing normalizes legacy archive rows so workbook_csv shows the 
   );
   assert.match(
     normalizedSnapshot["TenantMatch Links"]?.[1]?.[workbookCsvDataIndex] ?? "",
-    /^business_name,category,property_type,city,state,/,
+    /^business_name,category,property_type,type,city,state,/,
   );
 });
 
@@ -295,7 +295,7 @@ test("matching webhook payment unlocks csv and pdf downloads", async () => {
   assert.equal(csvResponse.status, 200);
   assert.equal(
     (await csvResponse.text()).split(/\r?\n/, 1)[0],
-    "business_name,category,property_type,city,state,distance_miles,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,rationale,owner_contact_name",
+    "business_name,category,property_type,type,city,state,distance_miles,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,rationale,owner_contact_name",
   );
 
   const { GET: pdfGET } = await import("../../src/app/r/[token]/download/pdf/route");
@@ -321,7 +321,7 @@ test("signed admin downloads work before payment and reject bad signatures", asy
   assert.equal(csvResponse.status, 200);
   assert.equal(
     (await csvResponse.text()).split(/\r?\n/, 1)[0],
-    "business_name,category,property_type,city,state,distance_miles,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,rationale,owner_contact_name",
+    "business_name,category,property_type,type,city,state,distance_miles,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,rationale,owner_contact_name",
   );
 
   const badSignatureResponse = await adminCsvGET(new Request(`http://localhost/a/${token}/download/csv?sig=bad`), {

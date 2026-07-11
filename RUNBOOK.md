@@ -1,16 +1,16 @@
 # TenantMatch Run Book
 
-TenantMatch is a sheet-backed workflow.
+TenantMatch is a local, CLI-driven, sheet-backed workflow.
 
 - The Google Sheet is the operating system.
-- The hosted app at `https://tenantmatch.app` is the engine.
-- Your local app is for development and testing.
+- Your local repo runs discovery, promotion, workbook generation, and draft creation.
+- The hosted app at `https://tenantmatch.app` serves public links, admin links, Stripe checkout, and Stripe webhooks.
 
 ## What Runs Where
 
-- `localhost:3000` is your local dev copy.
-- `tenantmatch.app` serves public links, admin links, Stripe checkout, Stripe webhooks, and automation routes.
-- True daily automation only works when the backend routes are deployed, not just running locally.
+- Local CLI runs the core workflow.
+- `localhost:3000` is optional for local UI development.
+- `tenantmatch.app` must be deployed with matching code for generated `/r/{token}` and `/a/{token}` links to open correctly.
 
 ## Main Sheet Tabs
 
@@ -90,11 +90,28 @@ Run locally:
 npm run dev
 ```
 
-Trigger discovery manually:
+Run discovery locally for one ZIP:
 
 ```bash
-curl -X POST https://tenantmatch.app/api/lite/discovery/run \
-  -H "Authorization: Bearer YOUR_AUTOMATION_SECRET"
+npm run discovery -- 01749
+```
+
+Run more than the safe default one listing:
+
+```bash
+npm run discovery -- 01749 --limit 25
+```
+
+Run a no-cost in-memory smoke test:
+
+```bash
+npm run discovery -- 01749 --mock --limit 1 --max-validations 1
+```
+
+Optional hosted link check after generation:
+
+```bash
+npm run discovery -- 01749 --limit 1 --check-links
 ```
 
 Send approved outreach manually:

@@ -4,6 +4,7 @@ const REQUIRED_HEADERS = [
   "business_name",
   "category",
   "property_type",
+  "type",
   "tenant_fit_score_100",
   "move_probability_1_10",
   "priority_rank",
@@ -52,6 +53,28 @@ function score(row: CandidateRow): number {
   return row.tenant_fit_score_100 * 0.6 + row.move_probability_1_10 * 4;
 }
 
+function inferLegacyProspectType(moveProbability: number, fitSummary: string): "Signal" | "Fit" {
+  if (/^no current move signal\b/i.test(fitSummary.trim())) {
+    return "Fit";
+  }
+
+  return moveProbability <= 3 ? "Fit" : "Signal";
+}
+
+function normalizeProspectType(value: string | undefined, moveProbability: number, fitSummary: string): "Signal" | "Fit" {
+  const normalized = (value ?? "").trim().toLowerCase();
+
+  if (normalized === "signal" || normalized === "signal-backed") {
+    return "Signal";
+  }
+
+  if (normalized === "fit" || normalized === "fit-only") {
+    return "Fit";
+  }
+
+  return inferLegacyProspectType(moveProbability, fitSummary);
+}
+
 function validateRationale(value: string, rowNumber: number): string {
   const rationale = value.trim();
 
@@ -95,6 +118,7 @@ export function parseAndNormalizeCsv(csv: string): CandidateRow[] {
       business_name: (cols[headerIndex.business_name] ?? "").trim(),
       category: (cols[headerIndex.category] ?? "N/A").trim() || "N/A",
       property_type: (cols[headerIndex.property_type] ?? "").trim() || "Mixed-use",
+      type: normalizeProspectType(cols[headerIndex.type], clamp(Number.isFinite(move) ? move : 1, 1, 10), cols[headerIndex.fit_summary] ?? ""),
       tenant_fit_score_100: clamp(Number.isFinite(fit) ? fit : 0, 0, 100),
       move_probability_1_10: clamp(Number.isFinite(move) ? move : 1, 1, 10),
       priority_rank: 0,
@@ -144,6 +168,7 @@ export function toCsv(rows: CandidateRow[]): string {
       row.business_name,
       row.category,
       row.property_type,
+      row.type,
       row.tenant_fit_score_100,
       row.move_probability_1_10,
       row.priority_rank,

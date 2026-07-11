@@ -28,6 +28,7 @@ export interface CandidateRow {
   business_name: string;
   category: string;
   property_type: string;
+  type: "Signal" | "Fit";
   tenant_fit_score_100: number;
   move_probability_1_10: number;
   priority_rank: number;
