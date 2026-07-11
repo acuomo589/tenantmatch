@@ -16,6 +16,7 @@ TenantMatch is a local, CLI-driven, sheet-backed workflow.
 
 - `Intake tab`
   Add or receive rows to process into preview/paywall links.
+  Configure this explicitly with `LITE_GOOGLE_SHEET_TAB_NAME=Intake`; the app should never guess the first tab.
 - `TenantMatch Links`
   Archive and source of truth for token, payment state, workbook backup data, paywall link, and admin link.
 - `ZIP Targets`

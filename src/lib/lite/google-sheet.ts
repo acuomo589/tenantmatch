@@ -209,17 +209,14 @@ async function createGoogleSheetTab(spreadsheetId: string, accessToken: string, 
   }
 }
 
-function resolveIntakeTabName(metadata: GoogleSheetMetadata, configuredTabName: string | null): string {
+function resolveIntakeTabName(configuredTabName: string | null): string {
   if (configuredTabName) {
     return configuredTabName;
   }
 
-  const title = metadata.sheets[0]?.properties?.title?.trim();
-  if (!title) {
-    throw new Error("Could not determine Google Sheet intake tab title.");
-  }
-
-  return title;
+  throw new Error(
+    "LITE_GOOGLE_SHEET_TAB_NAME must be configured in Google Sheets mode. Refusing to guess the intake tab because workflow tabs like ZIP Targets may appear first.",
+  );
 }
 
 function hasSheetTab(metadata: GoogleSheetMetadata, title: string): boolean {
@@ -278,7 +275,7 @@ async function createGoogleSheetAdapter(): Promise<LiteSheetAdapter> {
 
   const accessToken = await getGoogleAccessToken();
   let metadata = await loadSpreadsheetMetadata(spreadsheetId, accessToken);
-  const intakeTabName = resolveIntakeTabName(metadata, config.googleSheetTabName);
+  const intakeTabName = resolveIntakeTabName(config.googleSheetTabName);
   const archiveTabName = config.googleLinksTabName;
 
   if (!hasSheetTab(metadata, archiveTabName)) {
@@ -287,7 +284,8 @@ async function createGoogleSheetAdapter(): Promise<LiteSheetAdapter> {
   }
 
   if (!hasSheetTab(metadata, intakeTabName)) {
-    throw new Error(`Configured intake tab "${intakeTabName}" does not exist in the spreadsheet.`);
+    await createGoogleSheetTab(spreadsheetId, accessToken, intakeTabName);
+    metadata = await loadSpreadsheetMetadata(spreadsheetId, accessToken);
   }
 
   return {
