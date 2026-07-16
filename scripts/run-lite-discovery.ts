@@ -3,7 +3,7 @@ import path from "node:path";
 import process from "node:process";
 
 type CliOptions = {
-  zip: string;
+  zips: string[];
   limit: number;
   maxValidations: number;
   concurrency: number;
@@ -71,8 +71,11 @@ TenantMatch local discovery runner
 Usage:
   npm run discovery -- 01749
   npm run discovery -- 01749 --limit 25
+  npm run discovery -- 01608 01604 01605 --limit 25
+  npm run discovery -- --zips 01608,01604,01605 --limit 25
 
 Options:
+  --zips <list>           Comma-separated ZIP list. Positional ZIPs also work.
   --limit <n>             Promoted/processed listing cap. Default: 1.
   --max-validations <n>   Candidate validation cap. Default: 8.
   --concurrency <n>       Validation concurrency. Default: 2.
@@ -82,16 +85,34 @@ Options:
 `.trim());
 }
 
+function normalizeArgv(argv: string[]): string[] {
+  const normalized: string[] = [];
+
+  for (let index = 0; index < argv.length; index += 1) {
+    if (
+      argv[index] === "--" &&
+      ["limit", "max-validations", "concurrency", "zips"].includes((argv[index + 1] ?? "").trim())
+    ) {
+      normalized.push(`--${argv[index + 1]}`);
+      index += 1;
+      continue;
+    }
+
+    normalized.push(argv[index]);
+  }
+
+  return normalized;
+}
+
 function parseArgs(argv: string[]): CliOptions {
+  argv = normalizeArgv(argv);
+
   if (!argv.length || argv.includes("--help") || argv.includes("-h")) {
     printHelp();
     process.exit(0);
   }
 
-  const zip = argv.find((arg) => !arg.startsWith("--"));
-  if (!zip || !/^\d{5}$/.test(zip)) {
-    throw new Error("First argument must be a 5-digit ZIP code, e.g. `npm run discovery -- 01749`.");
-  }
+  const zips: string[] = [];
 
   let limit = readInteger(process.env.LITE_DISCOVERY_CLI_LIMIT, 1);
   let maxValidations = readInteger(process.env.LITE_DISCOVERY_CLI_MAX_VALIDATIONS, 8);
@@ -102,6 +123,14 @@ function parseArgs(argv: string[]): CliOptions {
   for (let index = 0; index < argv.length; ) {
     const arg = argv[index];
     if (!arg.startsWith("--")) {
+      for (const zip of arg.split(",").map((value) => value.trim()).filter(Boolean)) {
+        zips.push(zip);
+      }
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--") {
       index += 1;
       continue;
     }
@@ -139,11 +168,30 @@ function parseArgs(argv: string[]): CliOptions {
       continue;
     }
 
+    if (arg === "--zips" || arg.startsWith("--zips=")) {
+      const { value, consumed } = takeFlagValue(argv, index, "--zips");
+      for (const zip of value.split(",").map((part) => part.trim()).filter(Boolean)) {
+        zips.push(zip);
+      }
+      index += consumed;
+      continue;
+    }
+
     throw new Error(`Unknown option: ${arg}`);
   }
 
+  const uniqueZips = [...new Set(zips)];
+  const invalidZips = uniqueZips.filter((zip) => !/^\d{5}$/.test(zip));
+  if (!uniqueZips.length || invalidZips.length) {
+    throw new Error(
+      invalidZips.length
+        ? `Invalid ZIP code(s): ${invalidZips.join(", ")}. Use 5-digit ZIPs.`
+        : "Provide at least one 5-digit ZIP code, e.g. `npm run discovery -- 01749`.",
+    );
+  }
+
   return {
-    zip,
+    zips: uniqueZips,
     limit,
     maxValidations,
     concurrency,
@@ -214,42 +262,74 @@ async function main(): Promise<void> {
     adminLink: string;
   }> = [];
 
-  console.log(`[start] zip=${options.zip} limit=${options.limit} maxValidations=${options.maxValidations} concurrency=${options.concurrency}`);
+  console.log(
+    `[start] zips=${options.zips.join(",")} limit=${options.limit} maxValidations=${options.maxValidations} concurrency=${options.concurrency}`,
+  );
 
   const appUrl = getLiteAppUrl();
   const request = new Request(`${appUrl}/api/lite/discovery/run`, { method: "POST" });
-  const summary = await runLiteZipDiscovery({
-    tenantId: getLiteFallbackTenantId(),
-    request,
-    zipOverride: options.zip,
-    dailyLimitOverride: options.limit,
-    logger(event) {
-      console.log(`[${elapsed(startedAt)}] ${event.stage}: ${event.message}${formatData(event.data)}`);
+  const summaries: Array<Awaited<ReturnType<typeof runLiteZipDiscovery>>> = [];
 
-      if (event.stage === "finalize" && event.message === "Workbook link ready.") {
-        links.push({
-          address: String(event.data?.address ?? ""),
-          brokerName: event.data?.brokerName == null ? null : String(event.data.brokerName),
-          brokerEmail: event.data?.brokerEmail == null ? null : String(event.data.brokerEmail),
-          paywallLink: String(event.data?.paywallLink ?? ""),
-          adminLink: String(event.data?.adminLink ?? ""),
-        });
-      }
+  for (const [index, zip] of options.zips.entries()) {
+    if (options.zips.length > 1) {
+      console.log("");
+      console.log(`[zip ${index + 1}/${options.zips.length}] ${zip}`);
+    }
+
+    const summary = await runLiteZipDiscovery({
+      tenantId: getLiteFallbackTenantId(),
+      request,
+      zipOverride: zip,
+      dailyLimitOverride: options.limit,
+      logger(event) {
+        console.log(`[${elapsed(startedAt)}] ${zip} ${event.stage}: ${event.message}${formatData(event.data)}`);
+
+        if (event.stage === "finalize" && event.message === "Workbook link ready.") {
+          links.push({
+            address: String(event.data?.address ?? ""),
+            brokerName: event.data?.brokerName == null ? null : String(event.data.brokerName),
+            brokerEmail: event.data?.brokerEmail == null ? null : String(event.data.brokerEmail),
+            paywallLink: String(event.data?.paywallLink ?? ""),
+            adminLink: String(event.data?.adminLink ?? ""),
+          });
+        }
+      },
+    });
+    summaries.push(summary);
+  }
+
+  const totals = summaries.reduce(
+    (acc, summary) => ({
+      candidateCount: acc.candidateCount + summary.candidateCount,
+      qualifiedCount: acc.qualifiedCount + summary.qualifiedCount,
+      promotedCount: acc.promotedCount + summary.promotedCount,
+      processedCount: acc.processedCount + summary.processedCount,
+      draftCount: acc.draftCount + summary.draftCount,
+      errorCount: acc.errorCount + summary.errorCount,
+    }),
+    {
+      candidateCount: 0,
+      qualifiedCount: 0,
+      promotedCount: 0,
+      processedCount: 0,
+      draftCount: 0,
+      errorCount: 0,
     },
-  });
+  );
 
   console.log("");
   console.log("Summary");
-  console.log(`  zip: ${summary.zip}`);
-  console.log(`  candidates: ${summary.candidateCount}`);
-  console.log(`  qualified: ${summary.qualifiedCount}`);
-  console.log(`  promoted: ${summary.promotedCount}`);
-  console.log(`  processed: ${summary.processedCount}`);
-  console.log(`  drafts: ${summary.draftCount}`);
-  console.log(`  errors: ${summary.errorCount}`);
-  if (summary.notes.length) {
-    console.log(`  notes: ${summary.notes.join(" | ")}`);
+  for (const summary of summaries) {
+    console.log(
+      `  ${summary.zip}: candidates=${summary.candidateCount} qualified=${summary.qualifiedCount} promoted=${summary.promotedCount} processed=${summary.processedCount} drafts=${summary.draftCount} errors=${summary.errorCount}`,
+    );
+    if (summary.notes.length) {
+      console.log(`    notes: ${summary.notes.join(" | ")}`);
+    }
   }
+  console.log(
+    `  total: candidates=${totals.candidateCount} qualified=${totals.qualifiedCount} promoted=${totals.promotedCount} processed=${totals.processedCount} drafts=${totals.draftCount} errors=${totals.errorCount}`,
+  );
 
   if (links.length) {
     console.log("");
@@ -267,7 +347,7 @@ async function main(): Promise<void> {
     await smokeCheckLinks(links);
   }
 
-  if (summary.errorCount > 0 || summary.processedCount === 0) {
+  if (totals.errorCount > 0 || totals.processedCount === 0) {
     process.exitCode = 1;
   }
 }

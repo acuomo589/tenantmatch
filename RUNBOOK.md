@@ -103,6 +103,12 @@ Run more than the safe default one listing:
 npm run discovery -- 01749 --limit 25
 ```
 
+Run a market as multiple ZIPs:
+
+```bash
+npm run discovery -- 01608 01604 01605 01606 01610 --limit 25 --max-validations 31 --check-links
+```
+
 Run a no-cost in-memory smoke test:
 
 ```bash
