@@ -43,6 +43,7 @@ import {
   getOrderedTrustedLiteBrokerContacts,
   hasTrustedLiteBrokerEmail,
   rankLiteDiscoveryCandidates,
+  resolveLiteBrokerContactEmails,
   validateLiteDiscoveredCandidate,
 } from "@/lib/lite/discovery";
 
@@ -542,9 +543,50 @@ export async function runLiteZipDiscovery(args: {
           continue;
         }
 
-        const validated = result.candidate;
+        let validated = result.candidate;
 
         let row: DiscoveredListingRow;
+        const canResolveBrokerEmail =
+          validated.isListingPage &&
+          validated.isActive &&
+          LAUNCH_PROPERTY_TYPES.includes(validated.propertyType as (typeof LAUNCH_PROPERTY_TYPES)[number]) &&
+          !hasTrustedLiteBrokerEmail(validated) &&
+          (validated.listingContactNames.length > 0 || Boolean(validated.brokerName));
+
+        if (canResolveBrokerEmail) {
+          emitLog(args.logger, "validate", "Resolving broker emails from trusted secondary sources.", {
+            title: validated.listingTitle,
+            address: validated.listingAddress,
+            sourceUrl: validated.sourceUrl,
+            listingContactNames: validated.listingContactNames,
+            brokerName: validated.brokerName,
+          });
+
+          try {
+            validated = await resolveLiteBrokerContactEmails({
+              zip: selected.zip,
+              candidate: validated,
+            });
+            const resolvedContacts = getOrderedTrustedLiteBrokerContacts(validated);
+            if (hasTrustedLiteBrokerEmail(validated)) {
+              emitLog(args.logger, "validate", "Resolved broker email from secondary source.", {
+                title: validated.listingTitle,
+                address: validated.listingAddress,
+                resolvedCount: resolvedContacts.length,
+                brokerEmails: resolvedContacts.map((contact) => contact.email),
+              });
+            }
+          } catch (error) {
+            const resolverError = error instanceof Error ? error.message : "Unexpected broker email resolution failure.";
+            summary.notes.push(`Broker email resolver failed for ${validated.listingAddress}: ${resolverError}`);
+            emitLog(args.logger, "validate", "Broker email resolution failed.", {
+              title: validated.listingTitle,
+              address: validated.listingAddress,
+              error: resolverError,
+            });
+          }
+        }
+
         if (!validated.isListingPage || !validated.isActive) {
           emitLog(args.logger, "validate", "Skipped stale or indirect listing.", {
             title: validated.listingTitle,

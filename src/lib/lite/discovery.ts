@@ -49,6 +49,17 @@ type ValidationSchema = {
   notes: string;
 };
 
+type BrokerEmailResolutionSchema = {
+  verifiedBrokerContacts: Array<{
+    name: string;
+    email: string;
+    emailSourceType: LiteDiscoveryEmailSourceType;
+    emailSourceUrl: string | null;
+  }>;
+  emailConfidence: "high" | "medium" | "low";
+  notes: string;
+};
+
 const MOCK_DISCOVERY_DATA: Array<{
   zip: string;
   sourceUrl: string;
@@ -181,11 +192,24 @@ const MOCK_DISCOVERY_DATA: Array<{
   },
 ];
 
+const MOCK_EMAIL_RESOLUTION_DATA: Record<string, LiteVerifiedBrokerContact[]> = {
+  "https://loopnet.example/hudson-no-email": [
+    {
+      name: "Casey Lane",
+      email: "casey@example.com",
+      emailSourceType: "brokerage_website_page",
+      emailSourceUrl: "https://lanecommercial.example.com/team/casey-lane",
+    },
+  ],
+};
+
 const TRUSTED_EMAIL_SOURCE_TYPES = new Set<LiteDiscoveryEmailSourceType>([
   "listing_page",
   "broker_profile_page",
   "brokerage_website_page",
 ]);
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const CONFIDENCE_SCORES: Record<LiteDiscoveryCandidate["confidence"], number> = {
   high: 3,
@@ -241,6 +265,41 @@ function normalizePersonKey(value: string): string {
     .trim();
 }
 
+function contactNameMatchesKnownBroker(contactName: string, knownBrokerNames: string[]): boolean {
+  const contactKey = normalizePersonKey(contactName);
+  if (!contactKey) return false;
+
+  const contactTokens = contactKey.split(" ");
+  for (const knownBrokerName of knownBrokerNames) {
+    const knownKey = normalizePersonKey(knownBrokerName);
+    if (!knownKey) continue;
+
+    if (contactKey === knownKey) {
+      return true;
+    }
+
+    const knownTokens = knownKey.split(" ");
+    const contactLooksLikePerson = contactTokens.length >= 2;
+    const knownLooksLikePerson = knownTokens.length >= 2;
+    if (
+      contactLooksLikePerson &&
+      knownLooksLikePerson &&
+      contactTokens[0] === knownTokens[0] &&
+      contactTokens[contactTokens.length - 1] === knownTokens[knownTokens.length - 1]
+    ) {
+      return true;
+    }
+
+    const shorter = contactKey.length < knownKey.length ? contactKey : knownKey;
+    const longer = contactKey.length < knownKey.length ? knownKey : contactKey;
+    if (shorter.length >= 6 && longer.includes(shorter)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function normalizeVerifiedBrokerContacts(
   contacts: ValidationSchema["verifiedBrokerContacts"],
   fallbackListingUrl: string,
@@ -256,6 +315,61 @@ function normalizeVerifiedBrokerContacts(
           : contact.emailSourceUrl?.trim() || null,
     }))
     .filter((contact) => Boolean(contact.name) && Boolean(contact.email));
+}
+
+function dedupeVerifiedBrokerContacts(contacts: LiteVerifiedBrokerContact[]): LiteVerifiedBrokerContact[] {
+  const deduped: LiteVerifiedBrokerContact[] = [];
+  const seenEmails = new Set<string>();
+
+  for (const contact of contacts) {
+    const emailKey = contact.email.trim().toLowerCase();
+    if (!emailKey || seenEmails.has(emailKey)) {
+      continue;
+    }
+
+    deduped.push(contact);
+    seenEmails.add(emailKey);
+  }
+
+  return deduped;
+}
+
+function mergeVerifiedBrokerContacts(
+  current: LiteVerifiedBrokerContact[],
+  resolved: LiteVerifiedBrokerContact[],
+): LiteVerifiedBrokerContact[] {
+  return dedupeVerifiedBrokerContacts([...current, ...resolved]);
+}
+
+function getKnownBrokerNames(candidate: LiteValidatedDiscovery): string[] {
+  return [...candidate.listingContactNames, candidate.brokerName].filter(
+    (value): value is string => Boolean(value?.trim()),
+  );
+}
+
+function filterTrustedResolvedContacts(args: {
+  contacts: LiteVerifiedBrokerContact[];
+  knownBrokerNames: string[];
+}): LiteVerifiedBrokerContact[] {
+  return args.contacts.filter((contact) => {
+    if (!TRUSTED_EMAIL_SOURCE_TYPES.has(contact.emailSourceType)) {
+      return false;
+    }
+
+    if (contact.emailSourceType !== "listing_page" && !contact.emailSourceUrl?.trim()) {
+      return false;
+    }
+
+    if (!EMAIL_PATTERN.test(contact.email.trim())) {
+      return false;
+    }
+
+    if (!args.knownBrokerNames.length) {
+      return false;
+    }
+
+    return contactNameMatchesKnownBroker(contact.name, args.knownBrokerNames);
+  });
 }
 
 export function getOrderedTrustedLiteBrokerContacts(candidate: LiteValidatedDiscovery): LiteVerifiedBrokerContact[] {
@@ -498,6 +612,174 @@ async function runDiscoverySearch(args: {
 
 export function hasTrustedLiteBrokerEmail(candidate: LiteValidatedDiscovery): boolean {
   return candidate.emailConfidence === "high" && getOrderedTrustedLiteBrokerContacts(candidate).length > 0;
+}
+
+export async function resolveLiteBrokerContactEmails(args: {
+  zip: string;
+  candidate: LiteValidatedDiscovery;
+}): Promise<LiteValidatedDiscovery> {
+  const knownBrokerNames = getKnownBrokerNames(args.candidate);
+  if (!knownBrokerNames.length || hasTrustedLiteBrokerEmail(args.candidate)) {
+    return args.candidate;
+  }
+
+  if (isMockAgenticFlowEnabled()) {
+    const resolved = filterTrustedResolvedContacts({
+      contacts: MOCK_EMAIL_RESOLUTION_DATA[args.candidate.sourceUrl] ?? [],
+      knownBrokerNames,
+    });
+    if (!resolved.length) {
+      return args.candidate;
+    }
+
+    const verifiedBrokerContacts = mergeVerifiedBrokerContacts(args.candidate.verifiedBrokerContacts, resolved);
+    const preferredBroker = selectPreferredLiteBrokerContact({
+      listingContactNames: args.candidate.listingContactNames,
+      verifiedBrokerContacts,
+    });
+
+    return {
+      ...args.candidate,
+      verifiedBrokerContacts,
+      brokerName: preferredBroker?.name ?? args.candidate.brokerName,
+      brokerEmail: preferredBroker?.email ?? args.candidate.brokerEmail,
+      brokerEmailSourceType: preferredBroker?.emailSourceType ?? args.candidate.brokerEmailSourceType,
+      brokerEmailSourceUrl: preferredBroker?.emailSourceUrl ?? args.candidate.brokerEmailSourceUrl,
+      emailConfidence: "high",
+      notes: `${args.candidate.notes} Broker email resolver confirmed an email on a trusted secondary source.`.trim(),
+    };
+  }
+
+  const config = getAiConfig();
+  const response = await postOpenAiResponses({
+    model: config.listingResearchModel,
+    input: [
+      {
+        role: "system",
+        content:
+          "You resolve commercial real estate broker emails using web search. Be conservative. Return strict JSON only.",
+      },
+      {
+        role: "user",
+        content: JSON.stringify(
+          {
+            request:
+              "Find explicit public email addresses for the named listing broker contacts. This is a secondary contact-resolution pass after the listing was already validated as active.",
+            zip: args.zip,
+            listing: {
+              title: args.candidate.listingTitle,
+              address: args.candidate.listingAddress,
+              propertyType: args.candidate.propertyType,
+              sourceUrl: args.candidate.sourceUrl,
+              sourceDomain: args.candidate.sourceDomain,
+            },
+            listingContactNames: args.candidate.listingContactNames,
+            candidateBrokerName: args.candidate.brokerName,
+            rules: [
+              "Only resolve emails for brokers or brokerages explicitly named on the validated listing page.",
+              "Use trusted secondary sources only: official broker profile pages or official brokerage website pages that clearly match the named broker or named brokerage.",
+              "You may also use the original listing page if the email is explicitly visible there.",
+              "Do not use generic directories, people-search pages, social profiles, data brokers, scraped contact databases, or guessed email patterns.",
+              "Do not infer an email from a brokerage pattern. The exact email must be explicitly present on the cited source page.",
+              "If multiple named listing contacts have explicit trusted emails, return each one separately.",
+              "If no high-confidence explicit email is found, return an empty verifiedBrokerContacts array.",
+              "Set emailConfidence to high only when every returned email is explicit and the source clearly matches the named listing broker or brokerage.",
+            ],
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+    tools: [
+      {
+        type: "web_search",
+        user_location: {
+          type: "approximate",
+          country: "US",
+        },
+      },
+    ],
+    tool_choice: "auto",
+    max_output_tokens: 1400,
+    text: {
+      format: {
+        type: "json_schema",
+        name: "lite_broker_email_resolution",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["verifiedBrokerContacts", "emailConfidence", "notes"],
+          properties: {
+            verifiedBrokerContacts: {
+              type: "array",
+              maxItems: 10,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["name", "email", "emailSourceType", "emailSourceUrl"],
+                properties: {
+                  name: { type: "string" },
+                  email: { type: "string" },
+                  emailSourceType: {
+                    type: "string",
+                    enum: [...LITE_DISCOVERY_EMAIL_SOURCE_TYPES],
+                  },
+                  emailSourceUrl: { type: ["string", "null"] },
+                },
+              },
+            },
+            emailConfidence: {
+              type: "string",
+              enum: ["high", "medium", "low"],
+            },
+            notes: { type: "string" },
+          },
+        },
+        strict: true,
+      },
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Broker email resolution failed: ${response.status} ${await response.text()}`);
+  }
+
+  const payload = extractParsed<BrokerEmailResolutionSchema>((await response.json()) as ResponsesPayload);
+  if (payload.emailConfidence !== "high") {
+    return {
+      ...args.candidate,
+      notes: `${args.candidate.notes} Broker email resolver found no high-confidence trusted email. ${payload.notes}`.trim(),
+    };
+  }
+
+  const resolvedContacts = filterTrustedResolvedContacts({
+    contacts: normalizeVerifiedBrokerContacts(payload.verifiedBrokerContacts, args.candidate.sourceUrl),
+    knownBrokerNames,
+  });
+  if (!resolvedContacts.length) {
+    return {
+      ...args.candidate,
+      notes: `${args.candidate.notes} Broker email resolver found no trusted explicit broker email. ${payload.notes}`.trim(),
+    };
+  }
+
+  const verifiedBrokerContacts = mergeVerifiedBrokerContacts(args.candidate.verifiedBrokerContacts, resolvedContacts);
+  const preferredBroker = selectPreferredLiteBrokerContact({
+    listingContactNames: args.candidate.listingContactNames,
+    verifiedBrokerContacts,
+  });
+
+  return {
+    ...args.candidate,
+    verifiedBrokerContacts,
+    brokerName: preferredBroker?.name ?? args.candidate.brokerName,
+    brokerEmail: preferredBroker?.email ?? args.candidate.brokerEmail,
+    brokerEmailSourceType: preferredBroker?.emailSourceType ?? args.candidate.brokerEmailSourceType,
+    brokerEmailSourceUrl: preferredBroker?.emailSourceUrl ?? args.candidate.brokerEmailSourceUrl,
+    emailConfidence: "high",
+    notes: `${args.candidate.notes} Broker email resolver confirmed ${resolvedContacts.length} trusted email(s). ${payload.notes}`.trim(),
+  };
 }
 
 export async function discoverLiteZipCandidates(args: {

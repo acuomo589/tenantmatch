@@ -438,39 +438,38 @@ test("daily ZIP discovery promotes qualified listings, creates links, and queues
   };
   assert.equal(payload.summary?.zip, "01749");
   assert.equal(payload.summary?.candidateCount, 5);
-  assert.equal(payload.summary?.qualifiedCount, 3);
-  assert.equal(payload.summary?.promotedCount, 3);
-  assert.equal(payload.summary?.processedCount, 3);
-  assert.equal(payload.summary?.draftCount, 3);
+  assert.equal(payload.summary?.qualifiedCount, 4);
+  assert.equal(payload.summary?.promotedCount, 4);
+  assert.equal(payload.summary?.processedCount, 4);
+  assert.equal(payload.summary?.draftCount, 4);
   assert.equal(payload.summary?.errorCount, 0);
 
   const snapshot = getMockLiteSheetSnapshot();
-  assert.equal(snapshot.Sheet1?.length, 4);
-  assert.equal(snapshot["Broker Outreach Queue"]?.length, 4);
+  assert.equal(snapshot.Sheet1?.length, 5);
+  assert.equal(snapshot["Broker Outreach Queue"]?.length, 5);
   assert.equal(snapshot["Discovered Listings"]?.length, 7);
-  assert.equal(snapshot["Qualified Listings"]?.length, 3);
+  assert.equal(snapshot["Qualified Listings"]?.length, 4);
 
   const discoveredHeaders = snapshot["Discovered Listings"]?.[0] ?? [];
   const discoveryStatusIndex = discoveredHeaders.indexOf("discovery_status");
-  const skipReasonIndex = discoveredHeaders.indexOf("skip_reason");
   const emailSourceTypeIndex = discoveredHeaders.indexOf("broker_email_source_type");
   const emailSourceUrlIndex = discoveredHeaders.indexOf("broker_email_source_url");
   const brokerEmailIndex = discoveredHeaders.indexOf("broker_email");
   const sourceUrlIndex = discoveredHeaders.indexOf("source_url");
   const processedRows = snapshot["Discovered Listings"]?.slice(1) ?? [];
-  assert.equal(processedRows.filter((row) => row[discoveryStatusIndex] === "PROCESSED").length, 3);
+  assert.equal(processedRows.filter((row) => row[discoveryStatusIndex] === "PROCESSED").length, 4);
   assert.equal(processedRows.filter((row) => row[discoveryStatusIndex] === "SKIPPED_DUPLICATE").length, 1);
-  assert.equal(processedRows.filter((row) => row[discoveryStatusIndex] === "SKIPPED_NO_EMAIL").length, 1);
+  assert.equal(processedRows.filter((row) => row[discoveryStatusIndex] === "SKIPPED_NO_EMAIL").length, 0);
   assert.equal(processedRows.filter((row) => row[discoveryStatusIndex] === "SKIPPED_STALE").length, 1);
-  assert.match(
-    processedRows.find((row) => row[discoveryStatusIndex] === "SKIPPED_NO_EMAIL")?.[skipReasonIndex] ?? "",
-    /trustworthy public broker email/i,
-  );
   assert.equal(processedRows.filter((row) => row[emailSourceTypeIndex] === "broker_profile_page").length, 1);
-  assert.equal(processedRows.filter((row) => row[emailSourceTypeIndex] === "brokerage_website_page").length, 1);
+  assert.equal(processedRows.filter((row) => row[emailSourceTypeIndex] === "brokerage_website_page").length, 2);
   assert.match(
     processedRows.find((row) => row[emailSourceTypeIndex] === "broker_profile_page")?.[emailSourceUrlIndex] ?? "",
     /westadvisors\.example\.com/,
+  );
+  assert.match(
+    processedRows.find((row) => row[brokerEmailIndex] === "casey@example.com")?.[emailSourceUrlIndex] ?? "",
+    /lanecommercial\.example\.com/,
   );
   assert.deepEqual(
     processedRows
@@ -487,7 +486,7 @@ test("daily ZIP discovery promotes qualified listings, creates links, and queues
   const qualifiedAdminLinksIndex = qualifiedHeaders.indexOf("admin_links");
   const qualifiedSourceUrlsIndex = qualifiedHeaders.indexOf("source_urls");
   const qualifiedRows = snapshot["Qualified Listings"]?.slice(1) ?? [];
-  assert.equal(qualifiedRows.filter((row) => row[qualifiedStatusIndex] === "PROCESSED").length, 2);
+  assert.equal(qualifiedRows.filter((row) => row[qualifiedStatusIndex] === "PROCESSED").length, 3);
   const groupedIndustrialRow = qualifiedRows.find((row) => (row[qualifiedBrokersIndex] ?? "").includes("avery@example.com"));
   assert.ok(groupedIndustrialRow);
   assert.match(groupedIndustrialRow?.[qualifiedBrokersIndex] ?? "", /morgan@example\.com/);
@@ -523,6 +522,39 @@ test("mock discovery validation accepts a trusted secondary broker profile page 
   assert.equal(validated.brokerEmailSourceType, "broker_profile_page");
   assert.match(validated.brokerEmailSourceUrl ?? "", /westadvisors\.example\.com/);
   assert.equal(hasTrustedLiteBrokerEmail(validated), true);
+});
+
+test("mock broker email resolver recovers named listing contacts from trusted secondary pages", async () => {
+  const {
+    discoverLiteZipCandidates,
+    hasTrustedLiteBrokerEmail,
+    resolveLiteBrokerContactEmails,
+    validateLiteDiscoveredCandidate,
+  } = await import("../../src/lib/lite/discovery");
+
+  const candidates = await discoverLiteZipCandidates({
+    zip: "01749",
+    propertyTypes: ["Retail", "Industrial"],
+  });
+  const candidate = candidates.find((row) => row.sourceUrl === "https://loopnet.example/hudson-no-email");
+
+  assert.ok(candidate);
+
+  const validated = await validateLiteDiscoveredCandidate({
+    zip: "01749",
+    candidate,
+  });
+  assert.equal(hasTrustedLiteBrokerEmail(validated), false);
+
+  const resolved = await resolveLiteBrokerContactEmails({
+    zip: "01749",
+    candidate: validated,
+  });
+
+  assert.equal(hasTrustedLiteBrokerEmail(resolved), true);
+  assert.equal(resolved.brokerEmail, "casey@example.com");
+  assert.equal(resolved.brokerEmailSourceType, "brokerage_website_page");
+  assert.match(resolved.brokerEmailSourceUrl ?? "", /lanecommercial\.example\.com/);
 });
 
 test("preferred broker selection chooses the first verified listing contact in listing order", async () => {
@@ -657,7 +689,7 @@ test("approved broker outreach drafts send through the lite queue route", async 
   const response = await sendPOST(new Request("http://localhost/api/lite/outreach/process-approved", { method: "POST" }));
   assert.equal(response.status, 200);
   const payload = (await response.json()) as { sentCount?: number; failedCount?: number };
-  assert.equal(payload.sentCount, 3);
+  assert.equal(payload.sentCount, 4);
   assert.equal(payload.failedCount, 0);
 
   const sentSnapshot = getMockLiteSheetSnapshot();
