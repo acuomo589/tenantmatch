@@ -3,6 +3,7 @@ import { beforeEach, test } from "node:test";
 import Stripe from "stripe";
 import { getLiteLinkWithWorkbookByToken, listLiteLinkItems } from "../../src/lib/lite/service";
 import { getMockLiteSheetSnapshot, resetMockLiteSheetValues } from "../../src/lib/lite/sheets";
+import { buildLiteWorkbookPrompt } from "../../src/lib/lite/prompt";
 import { createLiteAdminLinkSignature } from "../../src/lib/lite/url";
 import { generateLiteWorkbookFromAddress } from "../../src/lib/lite/workbooks";
 
@@ -32,6 +33,14 @@ test("lite workbook generation returns exactly 25 rows in mock mode", async () =
     assert.ok(row.rationale.length > 0);
     assert.ok(row.rationale.length <= 300);
   }
+});
+
+test("lite workbook prompt uses plain broker-note style for summaries and rationales", () => {
+  const prompt = buildLiteWorkbookPrompt();
+
+  assert.match(prompt, /Bob is a skeptical leasing broker/);
+  assert.match(prompt, /Do not use these phrases/);
+  assert.doesNotMatch(prompt, /FIT SUMMARY must include: why this tenant fits/);
 });
 
 test("sheet processing creates one workbook, reuses duplicate buyer rows, and is idempotent", async () => {

@@ -391,8 +391,8 @@ export const MOCK_WORKBOOK_ROWS: WorkbookRow[] = MOCK_WORKBOOK_NAMES.map((busine
   priority_rank: index + 1,
   fit_summary:
     index < 10
-      ? "Expansion signal found — operationally aligned with the building's access, power profile, and flexible bay depth, with enough scale to justify targeted tenant improvements."
-      : "No current move signal — operationally aligned with the building's access, power profile, and flexible bay depth, with enough scale to justify targeted tenant improvements.",
+      ? "Expansion signal found - access, power, and bay depth make this worth a broker call."
+      : "No move signal found - access, power, and bay depth make it a fit-based industrial prospect.",
   rationale:
     "Clear height, dock access, and power profile fit industrial throughput; regional freeway access supports logistics economics.",
   owner_contact_name: `${["Dana", "Morgan", "Taylor", "Jordan"][index % 4]} ${["Reed", "Parker", "Shaw", "Mills", "Flynn"][index % 5]}`,

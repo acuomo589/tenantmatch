@@ -175,7 +175,7 @@ COUNT: Return exactly 25 rows, filled in this priority order:
 2. If fewer than 25 qualify, fill the remainder with BEST-FIT UNVERIFIED candidates: real businesses
    that fit the property economically but for which NO current move signal was found.
    - These MUST carry move_probability <= 3.
-   - Their fit_summary MUST open with "No current move signal —" and state it is a fit-based
+   - Their fit_summary MUST open with "No move signal found -" and state it is a fit-based
      suggestion, not a timing-based one.
    - They rank strictly below every qualified candidate.
 Never invent a business to reach 25. UNVERIFIED is not the same as fake — it must be a real, named
@@ -230,8 +230,8 @@ tenant_fit_score_100
 move_probability_1_10
 - Score from the actual signal found in STEP 3, not from category priors. "This category tends to
   expand" is not a signal. No documented signal -> move_probability <= 3.
-- Driven by growth, friction, expansion patterns, category churn, and broker-actionable engagement
-  likelihood. This is the practical likelihood the prospect is worth outreach NOW.
+- Driven by a current move/expansion signal, deal friction, contactability, and whether a broker has
+  a believable reason to call NOW.
 - 10 = reachable decision path, strong expansion/move signal, low friction, strong property fit
 - 7-9 = plausible operator/franchisee/regional contact path and credible reason to engage
 - 4-6 = plausible fit but unclear timing, harder contact path, or moderate deal friction
@@ -270,12 +270,39 @@ fit_summary (<=400 chars)
 rationale (required, <=300 chars, immediately after fit_summary)
 owner_contact_name (real, found name only — N/A otherwise; never guess)
 
-FIT SUMMARY must include: why this tenant fits · their constraint · what incentive unlocks the deal ·
-positioning angle · why it's broker-actionable or what makes it a longshot.
+VOICE AND STYLE - WRITE FOR BOB THE BROKER
+
+Bob is a skeptical leasing broker. He does not want consultant copy, category filler, or AI-sounding
+phrases. Write like a short note he could use before making a call.
+
+Hard style rules:
+- Do not use these phrases: "address-inferred", "observed signal", "positioning angle",
+  "broker-actionable", "unlock", "modern inline storefront", "affluent suburban households",
+  "broadens non-food draw", "destination traffic", or "constraint is".
+- Do not write semicolon-stuffed lists. Use 1-2 plain sentences.
+- Do not say "no visible co-tenant list to verify." Say what Bob should verify, e.g.
+  "Confirm co-tenancy and exclusivity before pitching."
+- Do not call something a Signal unless you found a current, specific signal. If the only evidence is
+  category fit or franchise growth in a broad state, set type=Fit and move_probability <=3.
+- Prefer concrete nouns over abstractions: "needs plumbing and treatment rooms" beats
+  "wellness-service retail fit."
+- End with the broker's practical next move when useful: who to contact, what to verify, or what deal
+  term matters.
+
+FIT SUMMARY is the broker note. It must cover:
+- Why this tenant is worth a call for THIS property.
+- The real timing signal if one was found; otherwise start with "No move signal found -".
+- The main deal friction, such as TI, venting, parking, power, docks, signage, or exclusivity.
+- The practical broker angle in plain English.
+
+Good fit_summary example:
+"No move signal found - Restore fits only if the bay can support treatment rooms, plumbing/electric,
+signage, and easy parking. Call a local franchisee or area rep; pitch a low-friction wellness use,
+not a food tenant."
 
 RATIONALE is required on every row and states the TYPE-SPECIFIC reason this candidate fits THIS
-property. It must lead with the primary factor for the inferred property type and cite the specific
-observed signal.
+property. Keep it shorter and more specific than fit_summary. It should answer: "Why this property,
+not just why this category?"
 
 By type:
 
@@ -283,8 +310,11 @@ RETAIL / RESTAURANT
 - Must cite: (1) the co-tenancy relationship — which existing co-tenant/daypart this candidate
   COMPLETES or the OPEN LANE it fills, and (2) confirmation it does NOT compete with a visible
   co-tenant. Reference the anchor if present.
+- If site context is absent, do NOT fake co-tenancy. Say what to verify before outreach.
 - Example: "Fills open lunch daypart; Shaw's anchor drives daily traffic; no food co-tenant overlap
   (Red Ginger = Asian dinner)."
+- Example without site context: "Service retail could fit this trade area, but confirm neighboring
+  users and exclusives before pitching; no current move signal found."
 
 OFFICE
 - Must cite: (1) the move trigger (lease rollover / flight-to-quality / outgrowth), and (2) the

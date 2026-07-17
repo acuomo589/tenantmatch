@@ -90,8 +90,8 @@ function buildMockLiteWorkbookRows(): WorkbookRow[] {
       priority_rank: index + 1,
       fit_summary:
         index < 10
-          ? "Expansion signal found — operationally aligned with the building's access, loading profile, and flexible bay depth."
-          : "No current move signal — operationally aligned with the building's access, loading profile, and flexible bay depth.",
+          ? "Expansion signal found - access, loading, and flexible bay depth make this worth a broker call."
+          : "No move signal found - access, loading, and flexible bay depth make it a fit-based industrial prospect.",
       rationale: "Clear height and loading fit light industrial users; regional highway access supports distribution economics.",
       owner_contact_name: `Contact ${index + 1}`,
     });
@@ -191,9 +191,10 @@ async function repairWorkbookCsv(args: {
   const rationaleFixInstructions = normalizedParseError.includes("rationale")
     ? [
         "Every row MUST include `rationale` immediately after `fit_summary` and before `owner_contact_name`.",
-        "Each rationale must be <=300 chars and cite a concrete property-fit signal.",
-        "Retail / restaurant rationale must cite anchor, co-tenancy, open lane, or no-overlap logic.",
-        "Office rationale must cite move trigger plus building-class, commute, recruiting, or amenity logic.",
+        "Each rationale must be <=300 chars and sound like a plain leasing note for a skeptical broker.",
+        "Do not use phrases like address-inferred, observed signal, positioning angle, broker-actionable, or unlock.",
+        "Retail / restaurant rationale must cite anchor, co-tenancy, open lane, no-overlap logic, or say what to verify if site context is missing.",
+        "Office rationale must cite a move trigger plus building-class, commute, recruiting, or amenity logic.",
         "Industrial rationale must cite clear height, dock, power, yard, highway access, logistics, or labor logic.",
         "Medical rationale must cite payer mix, demographics, specialty clustering, hospital proximity, or referral logic.",
       ]

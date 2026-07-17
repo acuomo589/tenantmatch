@@ -176,19 +176,23 @@ owner_contact_name (or N/A)
 
 FIT SUMMARY REQUIREMENTS
 
+Write each summary like a short note for a skeptical leasing broker. Avoid consultant language.
+
 Each summary must include:
-- Why this tenant fits
-- What constraint they have
-- What incentive unlocks the deal
-- Positioning angle
+- Why this tenant is worth a call for this specific property
+- The real timing signal if one was found; otherwise say no current move signal was found
+- The main deal friction, such as TI, venting, parking, power, docks, signage, or exclusivity
+- The practical broker angle in plain English
 
 RATIONALE REQUIREMENTS
 
-Each rationale must state the type-specific reason this candidate fits this property and cite a
-concrete observed signal.
+Each rationale must state the type-specific reason this candidate fits this property. Keep it shorter
+and more specific than the summary. Do not use phrases like "address-inferred", "observed signal",
+"positioning angle", "broker-actionable", or "unlock".
 
 - Retail / Restaurant: cite the co-tenancy relationship or open lane it fills, confirm no visible
-  co-tenant overlap, and reference the anchor when present.
+  co-tenant overlap, and reference the anchor when present. If site context is missing, say what to
+  verify before outreach instead of inventing co-tenancy.
 - Office: cite the move trigger plus the building-class or amenity/talent factor. Do not make a
   co-tenancy claim.
 - Industrial: cite the gating spec match plus the location/logistics economics. Clustering is
