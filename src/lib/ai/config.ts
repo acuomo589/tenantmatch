@@ -31,7 +31,7 @@ export function getAiConfig(): AiConfig {
     exploreOptionsModel: process.env.AI_EXPLORE_OPTIONS_MODEL ?? "gpt-5.4",
     outreachEmailModel: process.env.AI_OUTREACH_EMAIL_MODEL ?? "gpt-4o",
     vertexModel: process.env.VERTEX_ANALYSIS_MODEL ?? "gemini-2.0-flash",
-    timeoutMs: Number(process.env.AI_TIMEOUT_MS ?? 30000),
+    timeoutMs: Number(process.env.AI_TIMEOUT_MS ?? 120000),
     langsmithApiKey: process.env.LANGSMITH_API_KEY,
     langsmithProject: process.env.LANGSMITH_PROJECT ?? "tenantmatch",
     langsmithTracingEnabled: process.env.LANGSMITH_TRACING === "true",

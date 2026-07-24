@@ -139,6 +139,28 @@ function validateRationale(value: string, rowNumber: number): string {
   return rationale;
 }
 
+function normalizeFitSummaryForType(type: "Signal" | "Fit", fitSummary: string): string {
+  const summary = fitSummary.trim().slice(0, 400);
+  if (type === "Signal" || /^no (?:current )?move signal found\s*-/i.test(summary)) {
+    return summary;
+  }
+
+  return `No move signal found - ${summary}`.slice(0, 400);
+}
+
+function normalizeWorkbookRow(row: WorkbookRow): WorkbookRow {
+  const type: "Signal" | "Fit" =
+    row.type === "Fit" || /^no (?:current )?move signal found\b/i.test(row.fit_summary) ? "Fit" : "Signal";
+  const moveProbability = type === "Fit" ? Math.min(row.move_probability_1_10, 3) : row.move_probability_1_10;
+
+  return {
+    ...row,
+    type,
+    move_probability_1_10: moveProbability,
+    fit_summary: normalizeFitSummaryForType(type, row.fit_summary),
+  };
+}
+
 function buildLegacyRationale(fitSummary: string): string {
   const firstClause = fitSummary
     .split(/[.;]/)
@@ -191,7 +213,7 @@ export function parseWorkbookCsv(
     .map((line, index) => {
       const cols = splitCsvLine(line);
       const rowNumber = index + 2;
-      return {
+      return normalizeWorkbookRow({
         business_name: (cols[headerIndex.business_name] ?? "").trim(),
         category: (cols[headerIndex.category] ?? "N/A").trim() || "N/A",
         property_type:
@@ -221,7 +243,7 @@ export function parseWorkbookCsv(
             ? validateRationale(cols[headerIndex.rationale] ?? "", rowNumber)
             : buildLegacyRationale(cols[headerIndex.fit_summary] ?? ""),
         owner_contact_name: (cols[headerIndex.owner_contact_name] ?? "N/A").trim() || "N/A",
-      } satisfies WorkbookRow;
+      } satisfies WorkbookRow);
     })
     .filter((row) => row.business_name)
     .sort((a, b) => score(b) - score(a));

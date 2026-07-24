@@ -7,6 +7,7 @@ import { buildLiteWorkbookPrompt } from "../../src/lib/lite/prompt";
 import { buildSiteContextJson } from "../../src/lib/lite/site-context";
 import { createLiteAdminLinkSignature } from "../../src/lib/lite/url";
 import { generateLiteWorkbookFromAddress } from "../../src/lib/lite/workbooks";
+import { parseWorkbookCsv } from "../../src/lib/workbookCsv";
 
 process.env.TENANTMATCH_MOCK_AGENTIC_FLOW = "1";
 process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
@@ -66,6 +67,21 @@ test("site context JSON preserves physical-envelope gating fields", () => {
   assert.equal(parsed.property_envelope, "rough standalone shack");
   assert.deepEqual(parsed.hard_vetos, ["boutique ice cream", "sit-down restaurant"]);
   assert.deepEqual(parsed.recommended_tenant_types, ["contractor showroom", "repair service"]);
+});
+
+test("workbook CSV parser clamps fit-only rows to low move probability", () => {
+  const csv = [
+    "business_name,category,property_type,type,city,state,distance_miles,tenant_fit_score_100,move_probability_1_10,priority_rank,fit_summary,rationale,owner_contact_name",
+    "Good Fit Co,Service Retail,Retail / Restaurant,Fit,Hudson,MA,1.2,88,8,1,Strong merchandising fit for the center.,Completes service lane; confirm exclusives before pitching.,N/A",
+    "Signal Co,Industrial,Industrial,Signal,Hudson,MA,2.5,80,6,2,Expansion signal found - needs nearby flex space.,Dock/loading fit; I-495 access supports logistics.,N/A",
+  ].join("\n");
+
+  const rows = parseWorkbookCsv(csv);
+  const fitRow = rows.find((row) => row.business_name === "Good Fit Co");
+
+  assert.equal(fitRow?.type, "Fit");
+  assert.equal(fitRow?.move_probability_1_10, 3);
+  assert.match(fitRow?.fit_summary ?? "", /^No move signal found -/);
 });
 
 test("sheet processing creates one workbook, reuses duplicate buyer rows, and is idempotent", async () => {

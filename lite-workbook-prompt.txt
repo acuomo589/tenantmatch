@@ -206,9 +206,13 @@ COUNT: Return exactly 25 rows, filled in this priority order:
    - These MUST carry move_probability <= 3.
    - Their fit_summary MUST open with "No move signal found -" and state it is a fit-based
      suggestion, not a timing-based one.
+   - A great merchandise/co-tenancy fit is still type=Fit and move_probability <= 3 if no current
+     move/expansion signal was found.
    - They rank strictly below every qualified candidate.
 Never invent a business to reach 25. UNVERIFIED is not the same as fake — it must be a real, named
 operator. No placeholders.
+Do not include defunct, merged-away, or stale brand names as prospects. If a brand has been absorbed
+or rebranded, use the current operating brand only when it independently passes the tests above.
 
 ---
 
@@ -316,6 +320,7 @@ Hard style rules:
   "Confirm co-tenancy and exclusivity before pitching."
 - Do not call something a Signal unless you found a current, specific signal. If the only evidence is
   category fit or franchise growth in a broad state, set type=Fit and move_probability <=3.
+- Never give a Fit row move_probability above 3. Fit means "good property match, weak/no timing."
 - Do not include a nearby local tenant just because it is close. If it already serves this trade area,
   exclude it unless a real expansion/displacement/outgrowth signal was found.
 - If site context shows a low-polish standalone/service site, do not sanitize it into "suburban retail."

@@ -56,6 +56,7 @@ Open `http://localhost:3000`.
 - `TENANTMATCH_MOCK_AGENTIC_FLOW` must stay unset or `0` in production. The legacy `TIMPANI_MOCK_AGENTIC_FLOW` name is still accepted for compatibility.
 - `AI_WORKBOOK_MODEL` controls workbook generation model (default `gpt-5.4`).
 - `AI_SITE_CONTEXT_MODEL` controls optional screenshot-to-context extraction (default `gpt-5.4`).
+- `AI_TIMEOUT_MS` controls each OpenAI request timeout (default `120000` for production-shaped workbook runs).
 - `GMAIL_FROM_EMAIL`, `GMAIL_SENDER_NAME`, `GMAIL_OAUTH_CLIENT_ID`, `GMAIL_OAUTH_CLIENT_SECRET`, and `GMAIL_OAUTH_REFRESH_TOKEN` power the autonomous broker-outreach send flow.
 - Set `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY` to capture agent/LLM traces in LangSmith.
 - Optional `LANGSMITH_PROJECT` controls project name in LangSmith (defaults to `tenantmatch`).
