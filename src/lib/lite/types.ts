@@ -80,6 +80,9 @@ export type LiteSheetRow = {
   buyerName: string | null;
   link: string;
   error: string | null;
+  listingTitle: string | null;
+  propertyType: string | null;
+  sourceUrl: string | null;
   siteContextHint: string | null;
   siteContextImageRefs: string[];
   forceRegenerate: boolean;

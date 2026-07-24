@@ -134,6 +134,14 @@ Run contract tests:
 npm run test:contracts
 ```
 
+## Visual Site Context
+
+- Local non-mock workbook generation captures best-effort Playwright screenshots of the listing page and a Google Maps search for the address.
+- Those screenshots become `siteContextJson`, which gates the workbook against the physical reality of the site: rough shack, small standalone service building, contractor/flex, weak restaurant viability, poor frontage, no same-center co-tenancy, and similar constraints.
+- This is intentionally local-first. `LITE_AUTO_SITE_CONTEXT_SCREENSHOTS` defaults on locally and off in production; set it explicitly if you need different behavior.
+- Existing cached workbooks will not change automatically. Set `force_regenerate` on the intake row when you want the new visual gate to rebuild a workbook.
+- Map/listing screenshots are best effort. If Google Maps or a listing page blocks automation, the run continues and the context prompt is told not to guess.
+
 ## Required Production Env
 
 - `APP_URL` or `NEXT_PUBLIC_APP_URL`

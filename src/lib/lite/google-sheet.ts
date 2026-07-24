@@ -40,8 +40,14 @@ type MockSheetState = {
   tabs: Record<string, string[][]>;
 };
 
+type GoogleAccessToken = {
+  accessToken: string;
+  expiresAt: number;
+};
+
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+const GOOGLE_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
 const DEFAULT_MOCK_VALUES = [
   ["broker_name", "email", "listing_address", "link"],
@@ -115,7 +121,7 @@ export function getMockLiteSheetSnapshot(): Record<string, string[][]> {
   );
 }
 
-async function getGoogleAccessToken(): Promise<string> {
+async function getGoogleAccessToken(): Promise<GoogleAccessToken> {
   const config = getLiteConfig();
   if (!config.googleServiceAccountEmail || !config.googleServiceAccountPrivateKey) {
     throw new Error("Google Sheets service account credentials are not configured.");
@@ -159,12 +165,16 @@ async function getGoogleAccessToken(): Promise<string> {
     throw new Error(`Failed to authenticate Google Sheets service account: ${response.status}`);
   }
 
-  const payloadJson = (await response.json()) as { access_token?: string };
+  const payloadJson = (await response.json()) as { access_token?: string; expires_in?: number };
   if (!payloadJson.access_token) {
     throw new Error("Google Sheets access token response was empty.");
   }
 
-  return payloadJson.access_token;
+  const expiresInMs = Math.max(60, payloadJson.expires_in ?? 3600) * 1000;
+  return {
+    accessToken: payloadJson.access_token,
+    expiresAt: Date.now() + expiresInMs,
+  };
 }
 
 async function loadSpreadsheetMetadata(spreadsheetId: string, accessToken: string): Promise<GoogleSheetMetadata> {
@@ -273,19 +283,47 @@ async function createGoogleSheetAdapter(): Promise<LiteSheetAdapter> {
   }
   const spreadsheetId = config.googleSpreadsheetId;
 
-  const accessToken = await getGoogleAccessToken();
-  let metadata = await loadSpreadsheetMetadata(spreadsheetId, accessToken);
+  let tokenState = await getGoogleAccessToken();
+  async function getFreshAccessToken(forceRefresh = false): Promise<string> {
+    if (forceRefresh || Date.now() >= tokenState.expiresAt - GOOGLE_TOKEN_REFRESH_BUFFER_MS) {
+      tokenState = await getGoogleAccessToken();
+    }
+
+    return tokenState.accessToken;
+  }
+
+  async function googleSheetsFetch(url: string, init?: RequestInit): Promise<Response> {
+    const buildInit = async (forceRefresh = false): Promise<RequestInit> => {
+      const token = await getFreshAccessToken(forceRefresh);
+      return {
+        ...init,
+        headers: {
+          ...(init?.headers ?? {}),
+          Authorization: `Bearer ${token}`,
+        },
+      };
+    };
+
+    const response = await fetch(url, await buildInit());
+    if (response.status !== 401) {
+      return response;
+    }
+
+    return fetch(url, await buildInit(true));
+  }
+
+  let metadata = await loadSpreadsheetMetadata(spreadsheetId, await getFreshAccessToken());
   const intakeTabName = resolveIntakeTabName(config.googleSheetTabName);
   const archiveTabName = config.googleLinksTabName;
 
   if (!hasSheetTab(metadata, archiveTabName)) {
-    await createGoogleSheetTab(spreadsheetId, accessToken, archiveTabName);
-    metadata = await loadSpreadsheetMetadata(spreadsheetId, accessToken);
+    await createGoogleSheetTab(spreadsheetId, await getFreshAccessToken(), archiveTabName);
+    metadata = await loadSpreadsheetMetadata(spreadsheetId, await getFreshAccessToken());
   }
 
   if (!hasSheetTab(metadata, intakeTabName)) {
-    await createGoogleSheetTab(spreadsheetId, accessToken, intakeTabName);
-    metadata = await loadSpreadsheetMetadata(spreadsheetId, accessToken);
+    await createGoogleSheetTab(spreadsheetId, await getFreshAccessToken(), intakeTabName);
+    metadata = await loadSpreadsheetMetadata(spreadsheetId, await getFreshAccessToken());
   }
 
   return {
@@ -299,19 +337,14 @@ async function createGoogleSheetAdapter(): Promise<LiteSheetAdapter> {
           continue;
         }
 
-        await createGoogleSheetTab(spreadsheetId, accessToken, tabName);
-        metadata = await loadSpreadsheetMetadata(spreadsheetId, accessToken);
+        await createGoogleSheetTab(spreadsheetId, await getFreshAccessToken(), tabName);
+        metadata = await loadSpreadsheetMetadata(spreadsheetId, await getFreshAccessToken());
       }
     },
     async readValues(tabName) {
       const range = `${quoteSheetTitle(tabName)}!A:ZZ`;
-      const response = await fetch(
+      const response = await googleSheetsFetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${config.googleSpreadsheetId}/values/${encodeURIComponent(range)}`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        },
       );
 
       if (!response.ok) {
@@ -345,21 +378,20 @@ async function createGoogleSheetAdapter(): Promise<LiteSheetAdapter> {
         if (requiredColumnCount > currentColumnCount) {
           await ensureGoogleSheetColumnCapacity({
             spreadsheetId,
-            accessToken,
+            accessToken: await getFreshAccessToken(),
             sheetId,
             currentColumnCount,
             requiredColumnCount,
           });
-          metadata = await loadSpreadsheetMetadata(spreadsheetId, accessToken);
+          metadata = await loadSpreadsheetMetadata(spreadsheetId, await getFreshAccessToken());
         }
       }
 
-      const response = await fetch(
+      const response = await googleSheetsFetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${accessToken}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({

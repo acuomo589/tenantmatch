@@ -17,16 +17,21 @@ import {
   resetMockLiteSheetValues,
   type SheetCellUpdate,
 } from "@/lib/lite/google-sheet";
+import { captureLiteSiteContextScreenshots } from "@/lib/lite/site-context-screenshots";
 import type { LiteProcessSummary, LiteSheetRow } from "@/lib/lite/types";
 import { generateLiteSiteContext, normalizeSiteContextImageRefs } from "@/lib/lite/site-context";
 import { buildLiteAdminLinkUrl, buildLiteLinkUrl } from "@/lib/lite/url";
 import { generateLiteWorkbookFromAddress } from "@/lib/lite/workbooks";
+import { isMockAgenticFlowEnabled } from "@/lib/testing/mock-agentic-flow";
 
 const ADDRESS_HEADERS = ["address", "listing_address"] as const;
 const BUYER_EMAIL_HEADERS = ["buyer_email", "email"] as const;
 const BUYER_NAME_HEADERS = ["buyer_name", "broker_name"] as const;
 const SITE_CONTEXT_HEADERS = ["site_context", "co_tenancy_notes", "cotenancy_notes", "site_notes"] as const;
 const SITE_CONTEXT_IMAGE_HEADERS = ["site_context_image_urls", "site_context_image_url", "map_image_urls", "map_image_url"] as const;
+const LISTING_TITLE_HEADERS = ["listing_title", "title"] as const;
+const PROPERTY_TYPE_HEADERS = ["property_type", "listing_type"] as const;
+const SOURCE_URL_HEADERS = ["source_url", "listing_url", "url"] as const;
 const FORCE_REGENERATE_HEADERS = ["force_regenerate", "refresh_workbook", "rerun"] as const;
 const LINK_HEADERS = ["link", "paywall_url", "payment_url"] as const;
 const ERROR_HEADERS = ["error"] as const;
@@ -81,6 +86,9 @@ function parseIntakeSheetValues(values: string[][], tabName: string): {
   const buyerNameIndex = findHeaderIndex(headers, BUYER_NAME_HEADERS);
   const siteContextIndex = findHeaderIndex(headers, SITE_CONTEXT_HEADERS);
   const siteContextImageIndex = findHeaderIndex(headers, SITE_CONTEXT_IMAGE_HEADERS);
+  const listingTitleIndex = findHeaderIndex(headers, LISTING_TITLE_HEADERS);
+  const propertyTypeIndex = findHeaderIndex(headers, PROPERTY_TYPE_HEADERS);
+  const sourceUrlIndex = findHeaderIndex(headers, SOURCE_URL_HEADERS);
   const forceRegenerateIndex = findHeaderIndex(headers, FORCE_REGENERATE_HEADERS);
   const existingLinkIndex = findHeaderIndex(headers, LINK_HEADERS);
   const existingErrorIndex = findHeaderIndex(headers, ERROR_HEADERS);
@@ -122,6 +130,9 @@ function parseIntakeSheetValues(values: string[][], tabName: string): {
     const address = readCell(row, addressIndex);
     const buyerEmail = readCell(row, buyerEmailIndex);
     const buyerName = buyerNameIndex >= 0 ? readCell(row, buyerNameIndex) || null : null;
+    const listingTitle = listingTitleIndex >= 0 ? readCell(row, listingTitleIndex) || null : null;
+    const propertyType = propertyTypeIndex >= 0 ? readCell(row, propertyTypeIndex) || null : null;
+    const sourceUrl = sourceUrlIndex >= 0 ? readCell(row, sourceUrlIndex) || null : null;
     const siteContextHint = siteContextIndex >= 0 ? readCell(row, siteContextIndex) || null : null;
     const siteContextImageRefs = siteContextImageIndex >= 0 ? normalizeSiteContextImageRefs(readCell(row, siteContextImageIndex)) : [];
     const forceRegenerate = forceRegenerateIndex >= 0 ? parseBooleanCell(readCell(row, forceRegenerateIndex)) : false;
@@ -145,6 +156,9 @@ function parseIntakeSheetValues(values: string[][], tabName: string): {
       buyerName,
       link,
       error,
+      listingTitle,
+      propertyType,
+      sourceUrl,
       siteContextHint,
       siteContextImageRefs,
       forceRegenerate,
@@ -284,11 +298,21 @@ export async function processLiteSheet(args: {
     const normalizedAddress = normalizeLiteAddress(inputAddress);
     const buyerEmail = normalizeBuyerEmail(row.buyerEmail);
     const buyerName = row.buyerName?.trim() || null;
-    const shouldForceRefresh = row.forceRegenerate || Boolean(row.siteContextHint || row.siteContextImageRefs.length);
     const buyerKey = `${args.tenantId}::${normalizedAddress}::${buyerEmail}`;
     const addressKey = `${args.tenantId}::${normalizedAddress}`;
 
     try {
+      const existingWorkbookSource = lookups.byAddressKey.get(addressKey);
+      const shouldAutoCaptureSiteContext =
+        config.autoSiteContextScreenshots &&
+        !isMockAgenticFlowEnabled() &&
+        !row.link &&
+        !existingWorkbookSource?.siteContextJson;
+      const shouldForceRefresh =
+        row.forceRegenerate ||
+        Boolean(row.siteContextHint || row.siteContextImageRefs.length) ||
+        shouldAutoCaptureSiteContext;
+
       if (row.link && !shouldForceRefresh) {
         const token = extractLiteTokenFromUrl(row.link);
         if (!token) {
@@ -431,15 +455,34 @@ export async function processLiteSheet(args: {
         continue;
       }
 
-      let workbookSource = lookups.byAddressKey.get(addressKey);
+      let workbookSource = existingWorkbookSource;
       let workbookCsv = shouldForceRefresh ? "" : workbookSource?.workbookCsv ?? "";
       let displayAddress = workbookSource?.displayAddress ?? inputAddress;
+      let siteContextHint = row.siteContextHint;
+      let siteContextImageRefs = row.siteContextImageRefs;
+
+      const shouldCaptureSiteContext = config.autoSiteContextScreenshots && (shouldForceRefresh || !workbookCsv);
+      if (shouldCaptureSiteContext) {
+        const captured = await captureLiteSiteContextScreenshots({
+          inputAddress,
+          listingTitle: row.listingTitle,
+          propertyType: row.propertyType,
+          sourceUrl: row.sourceUrl,
+          screenshotDir: config.siteContextScreenshotDir,
+        });
+
+        if (captured.imageRefs.length || captured.hint) {
+          siteContextImageRefs = [...siteContextImageRefs, ...captured.imageRefs];
+          siteContextHint = [siteContextHint, captured.hint].filter(Boolean).join("\n\n") || null;
+        }
+      }
+
       const generatedSiteContextJson =
-        row.siteContextHint || row.siteContextImageRefs.length
+        siteContextHint || siteContextImageRefs.length
           ? await generateLiteSiteContext({
               inputAddress,
-              siteContextHint: row.siteContextHint,
-              siteContextImageRefs: row.siteContextImageRefs,
+              siteContextHint,
+              siteContextImageRefs,
             })
           : null;
       const siteContextJson = generatedSiteContextJson ?? workbookSource?.siteContextJson ?? null;

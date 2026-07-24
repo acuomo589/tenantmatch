@@ -47,6 +47,8 @@ Open `http://localhost:3000`.
 - `LITE_DISCOVERY_DAILY_LIMIT` sets the default daily promotion cap per ZIP.
 - `LITE_DISCOVERY_MAX_VALIDATIONS_PER_RUN` caps how many discovered candidates are fully validated in one automation run.
 - `LITE_DISCOVERY_VALIDATION_CONCURRENCY` controls how many candidate validations run at once.
+- `LITE_AUTO_SITE_CONTEXT_SCREENSHOTS` controls local Playwright capture of the source listing and map view before workbook generation. It defaults on locally and off in production.
+- `LITE_SITE_CONTEXT_SCREENSHOT_DIR` optionally sets where those temporary screenshot files are written.
 - `LITE_AUTOMATION_SECRET` or `CRON_SECRET` protects the automation routes; `LITE_AUTOMATION_TENANT_ID` pins scheduled runs to the correct tenant when no interactive user is present.
 - `GOOGLE_SERVICE_ACCOUNT_EMAIL` + `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` enable server-side Google Sheets read/write access.
 - `AI_USE_MOCK=1` uses deterministic mock CSV output (default in example).
@@ -116,4 +118,5 @@ The parser also accepts the earlier generic aliases `address`, `buyer_email`, an
 ## Notes
 
 - In mock mode (`TENANTMATCH_MOCK_AGENTIC_FLOW=1`), workbook generation, sheet rows, and lite link persistence all fall back to deterministic in-memory fixtures so the flow can be tested without live external services.
+- Local non-mock workbook generation can capture best-effort listing/map screenshots and convert them into site context. This is meant to stop weak physical sites from receiving polished retail/restaurant tenant recommendations; existing workbooks need `force_regenerate` to use the new site-reality gate.
 - The automation routes are ready for Vercel cron or another scheduler, but no schedule is enabled by default in repo config; set the secret envs first, then attach your preferred scheduler.

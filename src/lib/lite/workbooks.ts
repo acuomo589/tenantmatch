@@ -26,6 +26,14 @@ const EXTRA_MOCK_NAMES = [
   "Meridian Process Support",
 ];
 
+const WORKBOOK_REQUEST_MAX_ATTEMPTS = 3;
+const WORKBOOK_RETRY_DELAYS_MS = [1000, 2500];
+const RETRYABLE_RESPONSE_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function escapeCsvCell(value: string | number): string {
   const stringValue = String(value);
   if (!/[",\n]/.test(stringValue)) return stringValue;
@@ -123,6 +131,59 @@ function extractCsvFromResponsesPayload(payload: ResponsesPayload): string | und
     .trim();
 }
 
+function isRetryableWorkbookRequestError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    error.name === "AbortError" ||
+    error.name === "TimeoutError" ||
+    message.includes("fetch failed") ||
+    message.includes("network") ||
+    message.includes("timeout")
+  );
+}
+
+async function fetchWorkbookResponsesWithRetry(args: {
+  apiKey: string;
+  body: Record<string, unknown>;
+  timeoutMs: number;
+}): Promise<Response> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= WORKBOOK_REQUEST_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${args.apiKey}`,
+        },
+        body: JSON.stringify(args.body),
+        signal: AbortSignal.timeout(args.timeoutMs),
+      });
+
+      if (!RETRYABLE_RESPONSE_STATUSES.has(response.status) || attempt >= WORKBOOK_REQUEST_MAX_ATTEMPTS) {
+        return response;
+      }
+
+      await response.body?.cancel();
+      await sleep(WORKBOOK_RETRY_DELAYS_MS[attempt - 1] ?? WORKBOOK_RETRY_DELAYS_MS.at(-1) ?? 1000);
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableWorkbookRequestError(error) || attempt >= WORKBOOK_REQUEST_MAX_ATTEMPTS) {
+        throw error;
+      }
+
+      await sleep(WORKBOOK_RETRY_DELAYS_MS[attempt - 1] ?? WORKBOOK_RETRY_DELAYS_MS.at(-1) ?? 1000);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Workbook request failed after retries.");
+}
+
 function canonicalizeWorkbookRows(rows: WorkbookRow[]): WorkbookRow[] {
   if (rows.length < LITE_WORKBOOK_ROW_COUNT) {
     throw new Error(`Workbook CSV returned ${rows.length} rows; expected ${LITE_WORKBOOK_ROW_COUNT}.`);
@@ -139,21 +200,19 @@ async function requestWorkbookCsv(args: {
   model: string;
   workbookPrompt: string;
   userContent: string;
+  timeoutMs: number;
 }): Promise<string | undefined> {
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${args.apiKey}`,
-    },
-    body: JSON.stringify({
+  const response = await fetchWorkbookResponsesWithRetry({
+    apiKey: args.apiKey,
+    timeoutMs: args.timeoutMs,
+    body: {
       model: args.model,
       input: [
         { role: "system", content: args.workbookPrompt },
         { role: "user", content: args.userContent },
       ],
       max_output_tokens: 5000,
-    }),
+    },
   });
 
   if (!response.ok) {
@@ -171,6 +230,7 @@ async function repairWorkbookCsv(args: {
   userContent: string;
   csvCandidate: string;
   parseError: string;
+  timeoutMs: number;
 }): Promise<string | undefined> {
   const normalizedParseError = args.parseError.toLowerCase();
   const propertyTypeFixInstructions = normalizedParseError.includes("property_type")
@@ -203,6 +263,7 @@ async function repairWorkbookCsv(args: {
   return requestWorkbookCsv({
     apiKey: args.apiKey,
     model: args.model,
+    timeoutMs: args.timeoutMs,
     workbookPrompt: [
       args.workbookPrompt,
       "",
@@ -267,6 +328,7 @@ export async function generateLiteWorkbookFromAddress(
       model,
       workbookPrompt,
       userContent,
+      timeoutMs: config.timeoutMs,
     });
 
     if (!candidateCsv) continue;
@@ -288,6 +350,7 @@ export async function generateLiteWorkbookFromAddress(
         userContent,
         csvCandidate: candidateCsv,
         parseError: lastError,
+        timeoutMs: config.timeoutMs,
       });
 
       if (!repairedCsv) continue;
@@ -309,6 +372,7 @@ export async function generateLiteWorkbookFromAddress(
           userContent,
           csvCandidate: repairedCsv,
           parseError: lastError,
+          timeoutMs: config.timeoutMs,
         });
 
         if (!validationRepairCsv) continue;

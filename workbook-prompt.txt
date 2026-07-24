@@ -38,7 +38,7 @@ If uncertain:
 
 STEP 2: PROPERTY + ECONOMIC MODEL (BY TYPE)
 
-You must evaluate how tenants make money, what blocks them, and what unlocks a deal.
+You must evaluate how tenants make money, what blocks them, and what deal structure makes sense.
 
 INDUSTRIAL
 - Econ: throughput − (rent + logistics + labor)
@@ -115,7 +115,7 @@ For each tenant, evaluate in this order:
    - Buildout cost, time, relocation risk
 
 4. Incentive Sensitivity
-   - What concessions are required to unlock the deal:
+   - What concessions are required to make the deal work:
      - Free rent
      - TI (tenant improvement allowance)
      - Flexible terms

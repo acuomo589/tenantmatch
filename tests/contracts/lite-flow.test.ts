@@ -4,6 +4,7 @@ import Stripe from "stripe";
 import { getLiteLinkWithWorkbookByToken, listLiteLinkItems } from "../../src/lib/lite/service";
 import { getMockLiteSheetSnapshot, resetMockLiteSheetValues } from "../../src/lib/lite/sheets";
 import { buildLiteWorkbookPrompt } from "../../src/lib/lite/prompt";
+import { buildSiteContextJson } from "../../src/lib/lite/site-context";
 import { createLiteAdminLinkSignature } from "../../src/lib/lite/url";
 import { generateLiteWorkbookFromAddress } from "../../src/lib/lite/workbooks";
 
@@ -40,7 +41,31 @@ test("lite workbook prompt uses plain broker-note style for summaries and ration
 
   assert.match(prompt, /Bob is a skeptical leasing broker/);
   assert.match(prompt, /Do not use these phrases/);
+  assert.match(prompt, /SITE REALITY GATE/);
+  assert.match(prompt, /what uses would make a broker laugh/i);
+  assert.match(prompt, /do not suggest .* moving\s+0\.5-2 miles down the road/i);
   assert.doesNotMatch(prompt, /FIT SUMMARY must include: why this tenant fits/);
+});
+
+test("site context JSON preserves physical-envelope gating fields", () => {
+  const json = buildSiteContextJson({
+    center_type: "not a center",
+    property_envelope: "rough standalone shack",
+    building_scale: "small single-tenant building",
+    building_condition: "rough/service-oriented",
+    likely_best_use: "contractor/service office",
+    retail_viability: "low - no inline co-tenancy",
+    restaurant_viability: "low - no visible food infrastructure",
+    visual_red_flags: ["blacksmith adjacency", "weak retail frontage"],
+    hard_vetos: ["boutique ice cream", "sit-down restaurant"],
+    recommended_tenant_types: ["contractor showroom", "repair service"],
+    avoid_tenant_types: ["boutique food", "wellness chain"],
+  });
+  const parsed = JSON.parse(json) as Record<string, unknown>;
+
+  assert.equal(parsed.property_envelope, "rough standalone shack");
+  assert.deepEqual(parsed.hard_vetos, ["boutique ice cream", "sit-down restaurant"]);
+  assert.deepEqual(parsed.recommended_tenant_types, ["contractor showroom", "repair service"]);
 });
 
 test("sheet processing creates one workbook, reuses duplicate buyer rows, and is idempotent", async () => {

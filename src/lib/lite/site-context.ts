@@ -6,6 +6,12 @@ type SiteContextConfidence = "high" | "medium" | "low";
 
 type LiteSiteContext = {
   center_type: string;
+  property_envelope: string;
+  building_scale: string;
+  building_condition: string;
+  likely_best_use: string;
+  retail_viability: string;
+  restaurant_viability: string;
   anchor_tenants: string[];
   visible_cotenants: Array<{
     name: string;
@@ -15,6 +21,11 @@ type LiteSiteContext = {
   parking_style: string;
   frontage_roads: string[];
   site_signals: string[];
+  physical_constraints: string[];
+  visual_red_flags: string[];
+  hard_vetos: string[];
+  recommended_tenant_types: string[];
+  avoid_tenant_types: string[];
   confidence_notes: string;
   source_summary: string;
 };
@@ -70,12 +81,23 @@ function normalizeSiteContext(value: unknown): LiteSiteContext {
 
   return {
     center_type: typeof record.center_type === "string" ? record.center_type.trim() : "",
+    property_envelope: typeof record.property_envelope === "string" ? record.property_envelope.trim() : "",
+    building_scale: typeof record.building_scale === "string" ? record.building_scale.trim() : "",
+    building_condition: typeof record.building_condition === "string" ? record.building_condition.trim() : "",
+    likely_best_use: typeof record.likely_best_use === "string" ? record.likely_best_use.trim() : "",
+    retail_viability: typeof record.retail_viability === "string" ? record.retail_viability.trim() : "",
+    restaurant_viability: typeof record.restaurant_viability === "string" ? record.restaurant_viability.trim() : "",
     anchor_tenants: normalizeStringArray(record.anchor_tenants),
     visible_cotenants,
     adjacent_uses: normalizeStringArray(record.adjacent_uses),
     parking_style: typeof record.parking_style === "string" ? record.parking_style.trim() : "",
     frontage_roads: normalizeStringArray(record.frontage_roads),
     site_signals: normalizeStringArray(record.site_signals),
+    physical_constraints: normalizeStringArray(record.physical_constraints),
+    visual_red_flags: normalizeStringArray(record.visual_red_flags),
+    hard_vetos: normalizeStringArray(record.hard_vetos),
+    recommended_tenant_types: normalizeStringArray(record.recommended_tenant_types),
+    avoid_tenant_types: normalizeStringArray(record.avoid_tenant_types),
     confidence_notes: typeof record.confidence_notes === "string" ? record.confidence_notes.trim() : "",
     source_summary: typeof record.source_summary === "string" ? record.source_summary.trim() : "",
   };

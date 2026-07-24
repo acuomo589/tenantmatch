@@ -20,6 +20,12 @@ function parseInteger(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
+function parseBoolean(value: string | undefined, fallback = false): boolean {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return fallback;
+  return ["1", "true", "yes", "y", "on"].includes(normalized);
+}
+
 function normalizePrivateKey(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   if (!trimmed) return undefined;
@@ -111,6 +117,11 @@ export function getLiteConfig() {
     discoveryDailyLimit: parseInteger(process.env.LITE_DISCOVERY_DAILY_LIMIT, 25),
     discoveryMaxValidationsPerRun: parseInteger(process.env.LITE_DISCOVERY_MAX_VALIDATIONS_PER_RUN, 18),
     discoveryValidationConcurrency: parseInteger(process.env.LITE_DISCOVERY_VALIDATION_CONCURRENCY, 3),
+    autoSiteContextScreenshots: parseBoolean(
+      process.env.LITE_AUTO_SITE_CONTEXT_SCREENSHOTS,
+      !isProductionRuntime(),
+    ),
+    siteContextScreenshotDir: process.env.LITE_SITE_CONTEXT_SCREENSHOT_DIR?.trim() || null,
     googleServiceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim() || null,
     googleServiceAccountPrivateKey: normalizePrivateKey(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY) || null,
     gmailFromEmail: process.env.GMAIL_FROM_EMAIL?.trim() || null,
