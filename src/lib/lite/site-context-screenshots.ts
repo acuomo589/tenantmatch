@@ -9,6 +9,7 @@ type CaptureArgs = {
   listingTitle?: string | null;
   propertyType?: string | null;
   sourceUrl?: string | null;
+  sourceUrls?: string[];
   screenshotDir?: string | null;
 };
 
@@ -44,6 +45,14 @@ function isHttpUrl(value: string | null | undefined): value is string {
 
 function buildMapSearchUrl(address: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+}
+
+function normalizeSourceUrls(args: CaptureArgs): string[] {
+  const urls = [...(args.sourceUrls ?? []), args.sourceUrl ?? ""]
+    .map((value) => value.trim())
+    .filter((value) => isHttpUrl(value));
+
+  return Array.from(new Set(urls)).slice(0, 4);
 }
 
 export async function captureLiteSiteContextScreenshots(args: CaptureArgs): Promise<CaptureResult> {
@@ -99,8 +108,9 @@ export async function captureLiteSiteContextScreenshots(args: CaptureArgs): Prom
   }
 
   try {
-    if (isHttpUrl(args.sourceUrl)) {
-      await capturePage("listing", args.sourceUrl);
+    const sourceUrls = normalizeSourceUrls(args);
+    for (const [index, sourceUrl] of sourceUrls.entries()) {
+      await capturePage(`listing-${index + 1}`, sourceUrl);
     }
 
     await capturePage("map", buildMapSearchUrl(args.inputAddress));

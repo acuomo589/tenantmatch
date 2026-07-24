@@ -31,7 +31,7 @@ const SITE_CONTEXT_HEADERS = ["site_context", "co_tenancy_notes", "cotenancy_not
 const SITE_CONTEXT_IMAGE_HEADERS = ["site_context_image_urls", "site_context_image_url", "map_image_urls", "map_image_url"] as const;
 const LISTING_TITLE_HEADERS = ["listing_title", "title"] as const;
 const PROPERTY_TYPE_HEADERS = ["property_type", "listing_type"] as const;
-const SOURCE_URL_HEADERS = ["source_url", "listing_url", "url"] as const;
+const SOURCE_URL_HEADERS = ["source_urls", "source_url", "listing_urls", "listing_url", "url"] as const;
 const FORCE_REGENERATE_HEADERS = ["force_regenerate", "refresh_workbook", "rerun"] as const;
 const LINK_HEADERS = ["link", "paywall_url", "payment_url"] as const;
 const ERROR_HEADERS = ["error"] as const;
@@ -52,6 +52,21 @@ function readCell(row: string[] | undefined, index: number): string {
 
 function parseBooleanCell(value: string): boolean {
   return TRUE_VALUES.has(value.trim().toLowerCase());
+}
+
+function parseSourceUrls(value: string | null): string[] {
+  if (!value) return [];
+
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  for (const candidate of value.split(/[\n,]+/)) {
+    const trimmed = candidate.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    urls.push(trimmed);
+  }
+
+  return urls;
 }
 
 function createLiteToken(): string {
@@ -132,7 +147,8 @@ function parseIntakeSheetValues(values: string[][], tabName: string): {
     const buyerName = buyerNameIndex >= 0 ? readCell(row, buyerNameIndex) || null : null;
     const listingTitle = listingTitleIndex >= 0 ? readCell(row, listingTitleIndex) || null : null;
     const propertyType = propertyTypeIndex >= 0 ? readCell(row, propertyTypeIndex) || null : null;
-    const sourceUrl = sourceUrlIndex >= 0 ? readCell(row, sourceUrlIndex) || null : null;
+    const sourceUrls = parseSourceUrls(sourceUrlIndex >= 0 ? readCell(row, sourceUrlIndex) || null : null);
+    const sourceUrl = sourceUrls[0] ?? null;
     const siteContextHint = siteContextIndex >= 0 ? readCell(row, siteContextIndex) || null : null;
     const siteContextImageRefs = siteContextImageIndex >= 0 ? normalizeSiteContextImageRefs(readCell(row, siteContextImageIndex)) : [];
     const forceRegenerate = forceRegenerateIndex >= 0 ? parseBooleanCell(readCell(row, forceRegenerateIndex)) : false;
@@ -159,6 +175,7 @@ function parseIntakeSheetValues(values: string[][], tabName: string): {
       listingTitle,
       propertyType,
       sourceUrl,
+      sourceUrls,
       siteContextHint,
       siteContextImageRefs,
       forceRegenerate,
@@ -468,6 +485,7 @@ export async function processLiteSheet(args: {
           listingTitle: row.listingTitle,
           propertyType: row.propertyType,
           sourceUrl: row.sourceUrl,
+          sourceUrls: row.sourceUrls,
           screenshotDir: config.siteContextScreenshotDir,
         });
 
